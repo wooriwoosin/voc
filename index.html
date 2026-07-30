@@ -1,0 +1,1033 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>VOC 분석 대시보드 v3</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+:root{
+  --bg:#f0ede8;--surface:#faf9f7;--card:#ffffff;
+  --bd:rgba(0,0,0,0.07);--bd2:rgba(0,0,0,0.13);
+  --t1:#18181b;--t2:#71717a;--t3:#a1a1aa;
+  --red:#b91c1c;--red-s:#fef2f2;--red-m:#fee2e2;
+  --ora:#c2410c;--ora-s:#fff7ed;--ora-m:#fed7aa;
+  --grn:#15803d;--grn-s:#f0fdf4;
+  --blu:#1d4ed8;--blu-s:#eff6ff;--blu-m:#bfdbfe;
+  --pur:#6d28d9;--pur-s:#f5f3ff;
+  --mono:'JetBrains Mono',monospace;
+  --r:10px;--r2:14px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--t1);font-size:13px;line-height:1.6;min-height:100vh}
+
+/* 업로드 */
+#up{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2rem;gap:0}
+.up-eyebrow{font-family:var(--mono);font-size:10px;letter-spacing:.2em;color:var(--t3);text-transform:uppercase;margin-bottom:2.5rem}
+.up-h{font-size:32px;font-weight:600;letter-spacing:-.03em;margin-bottom:.5rem}
+.up-sub{font-size:14px;color:var(--t2);margin-bottom:2.5rem}
+.dropzone{width:100%;max-width:500px;background:var(--card);border:1.5px dashed var(--bd2);border-radius:20px;padding:3.5rem 2rem;text-align:center;cursor:pointer;transition:all .2s}
+.dropzone:hover,.dropzone.over{border-color:var(--blu);background:var(--blu-s)}
+.dz-icon{font-size:44px;margin-bottom:1.2rem;display:block}
+.dz-main{font-size:15px;font-weight:500;margin-bottom:5px}
+.dz-sub{font-size:12px;color:var(--t3)}
+#fi{display:none}
+.spec{margin-top:1.5rem;max-width:500px;width:100%;background:var(--card);border:1px solid var(--bd);border-radius:var(--r2);padding:1rem 1.25rem}
+.spec-hd{font-size:10px;font-weight:600;color:var(--t3);letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px}
+.spec-row{font-size:12px;color:var(--t2);padding:2px 0;display:flex;align-items:baseline;gap:6px}
+.spec-row::before{content:'›';color:var(--t3);font-size:10px}
+.err{display:none;margin-top:1rem;max-width:500px;width:100%;padding:10px 14px;background:var(--red-s);border:1px solid var(--red-m);border-radius:var(--r);font-size:12px;color:var(--red)}
+
+/* 대시보드 */
+#db{display:none}
+.topbar{height:50px;background:var(--card);border-bottom:1px solid var(--bd);padding:0 1.5rem;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:200}
+.tb-l{display:flex;align-items:center;gap:12px}
+.tb-logo{font-family:var(--mono);font-size:10px;letter-spacing:.15em;color:var(--t3);text-transform:uppercase}
+.tb-sep{width:1px;height:16px;background:var(--bd2)}
+.tb-title{font-size:13px;font-weight:600}
+.tb-meta{font-family:var(--mono);font-size:11px;color:var(--t3)}
+.btn-sm{font-size:11px;padding:5px 11px;border:1px solid var(--bd2);border-radius:6px;cursor:pointer;background:none;color:var(--t2);font-family:inherit;transition:all .15s}
+.btn-sm:hover{background:var(--bg)}
+
+.wrap{padding:1.25rem 1.5rem;max-width:1280px;margin:0 auto}
+
+/* 날짜 모드 토글 */
+.ctrl-bar{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:1.25rem}
+.date-toggle{display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:8px 12px}
+.dt-label{font-size:11px;color:var(--t2);font-weight:500}
+.dt-btns{display:flex;gap:3px;background:var(--bg);border-radius:6px;padding:2px}
+.dt-btn{font-size:11px;padding:4px 10px;border:none;border-radius:5px;cursor:pointer;background:none;color:var(--t2);font-family:inherit;transition:all .15s;white-space:nowrap}
+.dt-btn.on{background:var(--card);color:var(--t1);font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,0.1)}
+
+/* 지표 */
+.metrics{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:1.25rem}
+.mc{background:var(--card);border-radius:var(--r2);padding:.9rem 1.1rem;border:1px solid var(--bd)}
+.mc-lbl{font-size:10px;color:var(--t3);letter-spacing:.04em;margin-bottom:6px;font-weight:500}
+.mc-val{font-size:24px;font-weight:600;letter-spacing:-.03em;font-family:var(--mono);line-height:1}
+.mc-sub{font-size:11px;color:var(--t3);margin-top:5px}
+.c-r{color:var(--red)}.c-o{color:var(--ora)}.c-b{color:var(--blu)}.c-g{color:var(--grn)}.c-p{color:var(--pur)}
+
+/* 탭 */
+.tabs{display:flex;border-bottom:1px solid var(--bd);margin-bottom:1.25rem;overflow-x:auto;gap:0}
+.tb{padding:9px 15px;font-size:12px;font-weight:500;border:none;background:none;cursor:pointer;color:var(--t3);border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap;font-family:inherit;transition:all .15s}
+.tb.on{color:var(--t1);border-bottom-color:var(--t1)}
+.pnl{display:none}.pnl.on{display:block}
+
+/* 레이아웃 */
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+.card{background:var(--card);border-radius:var(--r2);border:1px solid var(--bd);padding:1.1rem 1.2rem;margin-bottom:10px}
+.card-h{font-size:11px;font-weight:600;color:var(--t2);letter-spacing:.04em;margin-bottom:12px;text-transform:uppercase}
+
+/* 패턴 리스트 */
+.pat-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--bd)}
+.pat-row:last-child{border-bottom:none}
+.pr-no{font-family:var(--mono);font-size:10px;color:var(--t3);min-width:16px}
+.pr-name{font-size:12px;flex:1}
+.pr-bar{flex:0 0 70px;height:5px;background:var(--bg);border-radius:3px;overflow:hidden}
+.pr-fill{height:100%;border-radius:3px}
+.pr-cnt{font-family:var(--mono);font-size:12px;font-weight:500;min-width:26px;text-align:right}
+.pr-detail{cursor:pointer;font-size:10px;color:var(--blu);padding:2px 6px;border:1px solid var(--blu-m);border-radius:4px;transition:all .15s;white-space:nowrap;background:none;font-family:inherit}
+.pr-detail:hover{background:var(--blu-s)}
+
+/* R-VOC 내용 서랍 */
+.content-drawer{display:none;margin-top:4px;margin-bottom:6px;background:var(--surface);border-radius:var(--r);border:1px solid var(--bd);overflow:hidden}
+.content-drawer.open{display:block}
+.cd-item{padding:10px 12px;border-bottom:1px solid var(--bd);font-size:11px;line-height:1.7}
+.cd-item:last-child{border-bottom:none}
+.cd-meta{display:flex;gap:6px;margin-bottom:5px;flex-wrap:wrap}
+.cd-text{color:var(--t1);word-break:break-all}
+.cd-more{padding:8px 12px;font-size:11px;color:var(--blu);cursor:pointer;text-align:center;background:var(--blu-s);border-top:1px solid var(--bd)}
+.cd-more:hover{background:var(--blu-m)}
+.cd-empty{padding:12px;font-size:11px;color:var(--t3);text-align:center}
+
+/* 테이블 */
+.tbl{width:100%;border-collapse:collapse;font-size:12px}
+.tbl th{padding:8px 10px;text-align:left;font-weight:600;font-size:10px;letter-spacing:.05em;color:var(--t3);border-bottom:1px solid var(--bd);background:var(--surface);white-space:nowrap;text-transform:uppercase}
+.tbl td{padding:7px 10px;border-bottom:1px solid var(--bd);vertical-align:middle}
+.tbl tr:last-child td{border-bottom:none}
+.tbl tr:hover td{background:#faf9f8}
+
+/* 필터/배지 */
+.fbar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+.flbl{font-size:10px;color:var(--t3);font-weight:600;letter-spacing:.05em;text-transform:uppercase}
+.fbtn{font-size:11px;padding:4px 10px;border:1px solid var(--bd);border-radius:20px;cursor:pointer;background:none;color:var(--t2);font-family:inherit;transition:all .15s;white-space:nowrap}
+.fbtn.on{background:var(--t1);color:#fff;border-color:var(--t1)}
+.pill{display:inline-block;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:600;font-family:var(--mono)}
+.p-r{background:var(--red-s);color:var(--red)}
+.p-o{background:var(--ora-s);color:var(--ora)}
+.p-b{background:var(--blu-s);color:var(--blu)}
+.p-g{background:var(--grn-s);color:var(--grn)}
+.p-p{background:var(--pur-s);color:var(--pur)}
+.tag{display:inline-block;font-size:10px;padding:1px 5px;border-radius:3px;font-weight:500;margin:1px}
+.t-r{background:var(--red-m);color:var(--red)}
+.t-o{background:var(--ora-m);color:var(--ora)}
+
+/* 비율 바 */
+.rbar{display:inline-flex;align-items:center;gap:5px}
+.rb-bg{width:44px;height:5px;background:var(--bg);border-radius:3px;overflow:hidden;display:inline-block;border:1px solid var(--bd)}
+.rb-f{height:100%;border-radius:3px}
+
+/* 업체 매핑 편집기 */
+.me-wrap{background:var(--surface);border:1px solid var(--bd);border-radius:var(--r2);padding:1.1rem;margin-bottom:10px}
+.me-title{font-size:12px;font-weight:600;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.me-badge{font-size:10px;background:var(--blu-s);color:var(--blu);padding:2px 7px;border-radius:10px;font-weight:500}
+.me-list{display:flex;flex-direction:column;gap:5px;max-height:260px;overflow-y:auto;margin-bottom:10px}
+.me-row{display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--bd);border-radius:var(--r);padding:7px 10px}
+.me-canon{font-size:12px;font-weight:600;min-width:90px;color:var(--t1)}
+.me-aliases{font-size:11px;color:var(--t2);flex:1;font-family:var(--mono);word-break:break-all}
+.me-del{font-size:10px;color:var(--red);cursor:pointer;padding:2px 7px;border:1px solid var(--red-m);border-radius:4px;background:none;font-family:inherit;white-space:nowrap;transition:all .15s}
+.me-del:hover{background:var(--red-s)}
+.me-add{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.me-inp{padding:6px 10px;border:1px solid var(--bd2);border-radius:var(--r);font-size:12px;font-family:inherit;background:var(--card);outline:none;transition:border .15s}
+.me-inp:focus{border-color:var(--blu)}
+.me-inp::placeholder{color:var(--t3)}
+.btn-add{padding:6px 14px;background:var(--t1);color:#fff;border:none;border-radius:var(--r);font-size:12px;cursor:pointer;font-family:inherit;white-space:nowrap}
+.btn-add:hover{opacity:.85}
+.me-note{font-size:10px;color:var(--t3);margin-top:6px}
+
+/* 실적 준비 */
+.coming-card{background:var(--card);border:1.5px dashed var(--bd2);border-radius:var(--r2);padding:3rem 2rem;text-align:center}
+.cc-icon{font-size:36px;margin-bottom:1rem}
+.cc-title{font-size:16px;font-weight:600;margin-bottom:6px}
+.cc-sub{font-size:13px;color:var(--t2);margin-bottom:1.5rem}
+.cc-feats{display:inline-flex;flex-direction:column;gap:6px;text-align:left;background:var(--bg);border-radius:var(--r);padding:1rem 1.25rem}
+.cc-feat{font-size:12px;color:var(--t2);display:flex;align-items:center;gap:8px}
+.cc-feat::before{content:'○';font-size:10px;color:var(--t3)}
+
+@media(max-width:900px){.metrics{grid-template-columns:repeat(3,1fr)}.g2{grid-template-columns:1fr}.wrap{padding:1rem}.topbar{padding:0 1rem}}
+</style>
+</head>
+<body>
+
+<!-- 업로드 -->
+<div id="up">
+  <div class="up-eyebrow">VOC Analytics · 통신사 민원 분석 v3</div>
+  <h1 class="up-h">VOC 패턴 분석 대시보드</h1>
+  <p class="up-sub">CSV 업로드 → 자동 분류 → 대시보드 생성</p>
+  <div class="dropzone" id="dz">
+    <span class="dz-icon">📂</span>
+    <div class="dz-main">파일을 드래그하거나 클릭하여 선택</div>
+    <div class="dz-sub">VOC_고객인입관리_*.csv · UTF-8</div>
+    <input type="file" id="fi" accept=".csv">
+  </div>
+  <div class="spec">
+    <div class="spec-hd">필수 컬럼</div>
+    <div class="spec-row">등록일, 구분, 통신사, 기타, 개통일자</div>
+    <div class="spec-row">유치자정보(수기입력) — 협력점·담당자 분류</div>
+  </div>
+  <div class="err" id="err"></div>
+</div>
+
+<!-- 대시보드 -->
+<div id="db">
+  <div class="topbar">
+    <div class="tb-l">
+      <span class="tb-logo">VOC Analytics</span>
+      <div class="tb-sep"></div>
+      <span class="tb-title" id="tb-title">—</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <span class="tb-meta" id="tb-meta">—</span>
+      <button class="btn-sm" onclick="resetApp()">← 다시 업로드</button>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="ctrl-bar">
+      <div class="date-toggle">
+        <span class="dt-label">날짜 기준</span>
+        <div class="dt-btns">
+          <button class="dt-btn on" onclick="setDateMode('reg',this)">등록일(발생일)</button>
+          <button class="dt-btn" onclick="setDateMode('open',this)">개통일자</button>
+        </div>
+      </div>
+      <div class="date-toggle">
+        <span class="dt-label">통신사</span>
+        <div class="dt-btns" id="cf-btns"></div>
+      </div>
+    </div>
+
+    <div class="metrics" id="metrics"></div>
+
+    <div class="tabs">
+      <button class="tb on" onclick="sw('overview')">전체 현황</button>
+      <button class="tb" onclick="sw('rvoc')">R-VOC급 패턴</button>
+      <button class="tb" onclick="sw('partner')">협력점별</button>
+      <button class="tb" onclick="sw('agent')">담당자별</button>
+      <button class="tb" onclick="sw('monthly')">월별 추이</button>
+      <button class="tb" onclick="sw('ops')">운영 주의</button>
+      <button class="tb" onclick="sw('mapping')">업체 매핑</button>
+    </div>
+
+    <div class="pnl on" id="pnl-overview"></div>
+    <div class="pnl" id="pnl-rvoc"></div>
+    <div class="pnl" id="pnl-partner"></div>
+    <div class="pnl" id="pnl-agent"></div>
+    <div class="pnl" id="pnl-monthly"></div>
+    <div class="pnl" id="pnl-ops"></div>
+    <div class="pnl" id="pnl-mapping"></div>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════
+// 분류 기준 (최종 확정)
+// ══════════════════════════════════════════
+const RVOC_MAP = {
+  // ※ 강성/욕설 제거 — 상담원 주관적 판단이라 기준 불일치
+  '타사위약금 대납 불이행':['타사 위약금','타사위약금','위약금 대납','위약금 지원','위약금 물어','LG 위약금','SK 위약금','SKT 위약금','스카이 위약금','위약금 내주','위약금 처리'],
+  '이중가입/이중납부':['이중가입','이중납부','이중으로 요금','이중 납부','이중으로 납부','2중','이중으로 청구','이중 청구'],
+  '사기/불법가입 주장':['사기','사기가입','기망','사칭','보이스피싱','명의도용','부정가입','불법영업'],
+  '대외기관 언급':['소보원','소비자원','방통위','경찰','법원','변호사','고발','고소','공정위','신문고','국민신문고','언론','뉴스제보','대외기관'],
+  '안내요금 vs 실청구 상이':['안내받은 요금','안내요금','청구요금 다','요금이 다','요금 다름','안내받은 금액','안내금액','요금 상이','요금상이','요금 틀'],
+  '타사해지 대행 약속 불이행':['해지해주기로','해지해주겠다','해지해준다','해지대행','해지 처리해주기로','해지 처리해주겠다','해지 약속','해지해준다고','기존회선 해지해','원스톱 미처리','원스톱 안됨','원스톱 안되'],
+  '단기가입 유도':['1년만 쓰라고','1년만 사용하라고','1년만 사용권유','1년만 사용 권유','1년만 사용하고 이동','1년 사용하고 이동','1년 쓰고 이동','1년만 사용하면 이동','10개월 이후 이동','9개월 이후 이동','1년뒤에 이동','1년 뒤에 이동','다시 이동','재이동','갔다가 다시','1년만 kt','1년만 lg','1년만 sk','1년간 kt','1년간 lg','1년간 sk','kt로 1년','lg로 1년','sk로 1년','1년만 사용하면 다','1년만 쓰면','1년만 쓰고','1년만 하고','기존 통신사로 다시','기존통신사로 다시','다시 기존 통신사','1년 후 다시','1년뒤 다시','1년만 유지하고'],
+};
+const OPS_MAP = {
+  '위약금/약정 미안내':['위약금 없','위약금 미안내','위약금 안내 못','약정 안내','약정미안내','약정 몰랐','3년 약정','3년약정'],
+  '업셀링':['업셀','업셀링'],
+  '소명요청':['소명','소명요청'],
+  '사은품/현금 미지급':['사은품 미지급','사은품 안','사은품 못','현금 미지급','현금 안','상품권 안','상품권 못','입금 안','미입금','입금이 안'],
+  '복지할인 누락':['복지할인','기초생활','장애인 할인','복지 등록'],
+  '결합할인 누락':['결합 누락','결합안됨','결합 안됨','결합 미'],
+  '담당자 연락두절(복합)':['연락두절','연락 안','전화 안받','통화 거부','연락거부','전화거부'],
+};
+
+// ══════════════════════════════════════════
+// 업체 매핑 초기값
+// ══════════════════════════════════════════
+let MAPPING = [
+  {c:'BCY', a:['비씨와이','BCY','bcy','비씨','비씨와이 BCY','BCY(구동민)','BCY(양은총)','BCY(조성지)','.BCY']},
+  {c:'JB에이블', a:['JB','JB인터넷','jb','jb인터넷','jb인터넷 / 상부타임','jb인터넷/ 상부타임','에이블','에이블 / 상부 홈앤비즈','에이블 양정환','에이블(JB)','에이블(JB)(양정환)','에이블(jb)','에이블JB','에이블jb','에이블양정환','(X)에이블양정환','★★JB인터넷●','양정환']},
+  {c:'엠투엠', a:['엠투엠','엠투 엠','엠투앰','엠우엠(우사인)','엠투엠(우사인)','우사인(엠투엠)','★★엠투엠(우사인)']},
+  {c:'KJ네트웍스', a:['KJ네트웍스','kj네트웍스','kj 네트웍스','JK네트웍스','jk네트웍스']},
+  {c:'아진', a:['아진','아진 정보통신','아진정보통신','아진정보통신 / (X)아진7']},
+  {c:'보라', a:['보라','보라네트워크','보라네트워크(영웅)','보라네트웍크']},
+  {c:'채움에스앤엘', a:['채움','채움에스앤엘','채움에스엔엘']},
+  {c:'씨엘텔레콤', a:['씨엘','씨엘텔레콤']},
+  {c:'CS프로', a:['CS프로','cs프로','★CS프로●','★★CS프로●','씨에스프로','씨에스 프로']},
+  {c:'피지', a:['피지','피지(케이제이)','◆◆피지(케이제이)','피지아이티에스','피지케이제이']},
+  {c:'엠제이통신', a:['엠제이','엠제이통신']},
+  {c:'티에스모바일', a:['티에스','티에스 모바일','티에스모바일','★★티에스모바일○']},
+  {c:'다드림', a:['다드림','(O)다드림','다드림 김성재','다드림(김성재)','김성재다드림']},
+  {c:'에스컴퍼니', a:['에스컴퍼니','백메가>>에스컴퍼니']},
+  {c:'삼성정보통신', a:['삼성','삼성정보통신',': 삼성정보통신']},
+  {c:'타임', a:['타임','타임,업셀링(이정숙)',': 타임','★타임●','★★타임●','타임(유선KT)']},
+  {c:'통신25', a:['통신25','통신 25']},
+  {c:'에스지네트워크', a:['에스지 네트워크','에스지네트워크']},
+  {c:'인가남', a:['인가남','인가남(엔터통신)']},
+  {c:'뉴폰', a:['뉴폰','뉴폰 배민성']},
+  {c:'에이스CCTV', a:['에이스','에이스CCTV','★★에이스CCTV●']},
+  {c:'아라', a:['아라','아라(시운)']},
+];
+
+// 업체명 확인불가 패턴 (x, X, -, ., 공백만 등)
+const UNKNOWN_RE = /^[\s\-\.xX×✕○●★◆\(\)\[\]\/\\]+$/;
+
+function normalize(name) {
+  if (!name) return null;
+  const n = name.trim();
+  if (!n) return null;
+  // 업체명 확인불가 패턴
+  if (UNKNOWN_RE.test(n) || n.length <= 1) return '[업체명 확인불가]';
+  for (const m of MAPPING) {
+    if (m.a.some(a => a.toLowerCase() === n.toLowerCase())) return m.c;
+  }
+  return n;
+}
+
+// ══════════════════════════════════════════
+// 파싱 유틸
+// ══════════════════════════════════════════
+const SKIP = new Set(['이주희','조광연','원주희','김시원']);
+// 자점 상담원 — 협력점 탭에 표시 안 함 (시흥·천안·부천 영업팀)
+const SELF_AGENTS = new Set([
+  '양지애','이민철','현보영','전하영','최시형','원주희','황인영',
+  '박윤철','박수빈','박수영','신예지','김시원','강병호','이상민',
+  '이상민2','이상민87','이상민95','최성훈','송유진','임제엽','장영준',
+  '권우빈','박광윤','백지연','노문희','박수영','유주연','전연정',
+  '계동윤','엄태공','최서우','정승호','홍혜리','노창훈','조항찬',
+  '김경태','김민석','서정인','송현정','이성희',
+]);
+// 지역+영업팀(선택)+이름 패턴 — 퇴/휴/영 접두사, 님 접미사, 유무선 접두 처리
+const AGENT_RE = /(?:^|유선\s*[:\s]*|무선\s*[:\s]*|유\s+|무\s+)(?:(시흥|천안|부천)(?:영업팀)?\s*[\/\s\-]?\s*(?:퇴\)?\s*|휴\)?\s*|\(퇴\)\s*|\(휴\)\s*|\(영\)\s*)?)([가-힣]{2,5}(?:님)?(?:\d{1,2})?)/;
+// 협력점 판별용: 영업팀 패턴이면 담당자이므로 협력점 아님
+const TEAM_RE = /(시흥|천안|부천)(?:영업팀|\s+[가-힣]{2,5})/;
+
+// 동명이인 숫자 코드 매핑
+const AGENT_NUM_MAP = {'이상민8':'이상민87','이상민9':'이상민95'};
+// 비정상 담당자명 → 확인불가 처리
+const INVALID_AGENT = new Set(['영업팀','영업','자체','사자','영업업팀']);
+
+function getPartner(row) {
+  let raw = String(row['유치자정보(수기입력)']||'').trim();
+  if (!raw || raw==='nan') return null;
+  if (raw.includes('유선') && raw.includes('/')) raw = raw.split('/')[0].replace(/유선\s*[:\s]*/,'').trim();
+  if (raw.includes('무선') && !raw.includes('유선')) raw = raw.replace(/무선\s*[:\s]*/,'').trim();
+  // 지역+이름 패턴 또는 영업팀 포함 → 담당자, 협력점 아님
+  if (TEAM_RE.test(raw)) return null;
+  if (/퇴|팀장|부장|이사|본부장/.test(raw)) return null;
+  // 자점 상담원 이름 단독 입력 → 협력점 아님
+  const cleanRaw = raw.replace(/님$/, '').trim();
+  if (SELF_AGENTS.has(cleanRaw)) return null;
+  return normalize(raw) || null;
+}
+
+function getAgent(row) {
+  const raw = String(row['유치자정보(수기입력)']||'').trim();
+  if (!raw || raw==='nan') return null;
+  const m = raw.match(AGENT_RE);
+  if (!m) return null;
+  const region = m[1];
+  let name = m[2].replace(/님$/, '').trim();
+  if (!region || !name) return null;
+  if (SKIP.has(name)) return null;
+  if (/팀장|부장|이사|과장|주임|사원|대리/.test(name)) return null;
+  // 비정상 담당자명 → 확인불가
+  if (INVALID_AGENT.has(name)) return `${region} 담당자확인불가`;
+  // 동명이인 숫자 코드 치환
+  const mapped = AGENT_NUM_MAP[name];
+  if (mapped) name = mapped;
+  return `${region} ${name}`;
+}
+
+// 패턴별 제외 키워드 — 해당 키워드가 텍스트에 있으면 해당 패턴에서 제외
+const RVOC_EXCLUDE = {
+  // 타사위약금: 단순 해지요청(위약금이 커서 해지), 해지방어, 보이스피싱 무관 해지 제외
+  '타사위약금 대납 불이행': [
+    '위약금 있어서 해지','위약금 나와서 해지','위약금 커서 해지',
+    '해지방어','해지인입건','고객센터 해지',
+    '보이스피싱','카드배송',
+  ],
+  // 이중가입: 단순 안내누락(고객 스스로 해지 안 한 것)은 제외, 해지대행 약속 케이스만 유지
+  // → 키워드 자체가 이미 "해지해주기로/대행" 방향으로만 잡히므로 별도 제외 없음
+  // 사기: 보이스피싱이 인터넷 가입과 무관한 케이스(카드배송 보이스피싱 등) 제외
+  '사기/불법가입 주장': [
+    '카드배송 보이스피싱','카드 배송 보이스피싱',
+    '보이스피싱 전화를 받아','보이스피싱 때문에 해지',
+  ],
+};
+
+function classify(text) {
+  const t = String(text||'');
+  let rvoc = Object.keys(RVOC_MAP).filter(k => RVOC_MAP[k].some(kw => t.includes(kw)));
+  // 패턴별 제외 키워드 적용
+  rvoc = rvoc.filter(k => {
+    const excl = RVOC_EXCLUDE[k];
+    if (!excl) return true;
+    return !excl.some(ex => t.includes(ex));
+  });
+  let ops = Object.keys(OPS_MAP).filter(k => OPS_MAP[k].some(kw => t.includes(kw)));
+  if (ops.includes('담당자 연락두절(복합)') && rvoc.length === 0)
+    ops = ops.filter(o => o !== '담당자 연락두절(복합)');
+  return {rvoc, ops, isRvoc: rvoc.length > 0};
+}
+
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// ══════════════════════════════════════════
+// 전역 상태
+// ══════════════════════════════════════════
+let G = {};
+let dateMode = 'reg';
+let carrierFilter = '전체';
+let pSort = 'rvoc', pMin = 5;
+let aSort = 'total', aRegion = '전체';
+const CI = {};
+let drawerPages = {};
+
+function makeChart(id, cfg) {
+  if (CI[id]) { CI[id].destroy(); delete CI[id]; }
+  const el = document.getElementById(id);
+  if (el) CI[id] = new Chart(el, cfg);
+}
+
+// ══════════════════════════════════════════
+// 업로드
+// ══════════════════════════════════════════
+const dz = document.getElementById('dz');
+const fi = document.getElementById('fi');
+dz.addEventListener('click', () => fi.click());
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('over'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('over'));
+dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('over'); if(e.dataTransfer.files[0]) procFile(e.dataTransfer.files[0]); });
+fi.addEventListener('change', e => { if(e.target.files[0]) procFile(e.target.files[0]); });
+
+function showErr(msg){ const el=document.getElementById('err'); el.textContent='⚠ '+msg; el.style.display='block'; }
+function hideErr(){ document.getElementById('err').style.display='none'; }
+
+function procFile(file) {
+  hideErr();
+  Papa.parse(file, {
+    header:true, skipEmptyLines:true, encoding:'UTF-8',
+    complete: r => { try{ initDB(r.data, file.name); } catch(e){ showErr(e.message); } },
+    error: () => showErr('CSV 파일 읽기 실패. UTF-8 인코딩을 확인해주세요.')
+  });
+}
+
+function resetApp() {
+  document.getElementById('up').style.display='flex';
+  document.getElementById('db').style.display='none';
+  fi.value=''; drawerPages={}; carrierFilter='전체';
+  Object.values(CI).forEach(c=>c.destroy());
+  for(const k in CI) delete CI[k];
+}
+
+// ══════════════════════════════════════════
+// 데이터 초기화
+// ══════════════════════════════════════════
+function initDB(raw, filename) {
+  const cols = Object.keys(raw[0]||{});
+  if (!cols.includes('기타')) throw new Error("'기타' 컬럼을 찾을 수 없습니다.");
+  if (!cols.includes('등록일')) throw new Error("'등록일' 컬럼을 찾을 수 없습니다.");
+
+  const rows = raw.map(r => {
+    const d = new Date(r['등록일']);
+    const od = r['개통일자'] ? new Date(r['개통일자']) : null;
+    return {...r,
+      _rd:d, _od:od,
+      _ry:d.getFullYear(), _rm:d.getMonth()+1,
+      _om: od&&!isNaN(od) ? od.getMonth()+1 : null,
+      _oy: od&&!isNaN(od) ? od.getFullYear() : null,
+      _ok:!isNaN(d)
+    };
+  }).filter(r=>r._ok);
+
+  const allData = rows;
+  if (!allData.length) throw new Error('데이터가 없습니다.');
+
+  const minY = Math.min(...allData.map(r=>r._ry));
+  const maxY = Math.max(...allData.map(r=>r._ry));
+  const periodLabel = minY===maxY ? `${minY}년` : `${minY}~${maxY}년`;
+
+  allData.forEach(r => {
+    r['기타'] = String(r['기타']||'');
+    const c = classify(r['기타']);
+    r._rvoc=c.rvoc; r._ops=c.ops; r._isRvoc=c.isRvoc;
+    r._partner=getPartner(r); r._agent=getAgent(r);
+  });
+
+  G = {allData, minY, maxY, filename};
+  document.getElementById('tb-title').textContent = `${periodLabel} VOC 분석`;
+  document.getElementById('tb-meta').textContent = `${filename} · ${allData.length.toLocaleString()}건`;
+
+  // 통신사 버튼 동적 생성
+  const carrierCnt = {};
+  allData.forEach(r=>{ const k=(r['통신사']||'').trim()||'미상'; carrierCnt[k]=(carrierCnt[k]||0)+1; });
+  const mainCarriers = ['KT','LG U+','SKT','SKYLIFE','SKB'];
+  const hasOther = allData.some(r=>!mainCarriers.includes((r['통신사']||'').trim()));
+  const carriers = ['전체',...mainCarriers.filter(c=>carrierCnt[c]>0),...(hasOther?['기타']:[])];
+  carrierFilter = '전체';
+  document.getElementById('cf-btns').innerHTML = carriers.map((c,i)=>
+    `<button class="dt-btn${i===0?' on':''}" onclick="setCarrier('${c}',this)">${c}${c!=='전체'&&carrierCnt[c]?` <span style="font-size:9px;opacity:.65">${carrierCnt[c]}</span>`:''}</button>`
+  ).join('');
+
+  document.getElementById('up').style.display='none';
+  document.getElementById('db').style.display='block';
+  renderAll();
+}
+
+// 날짜 기준 + 통신사 필터 적용 데이터·월 반환
+function getMD() {
+  const {allData} = G;
+  // 통신사 필터
+  const filtered = carrierFilter==='전체' ? allData
+    : carrierFilter==='기타' ? allData.filter(r=>!['KT','LG U+','SKT','SKYLIFE','SKB'].includes((r['통신사']||'').trim()))
+    : allData.filter(r=>(r['통신사']||'').trim()===carrierFilter);
+
+  if (dateMode==='reg') {
+    const ym = r => `${r._ry}-${String(r._rm).padStart(2,'0')}`;
+    const months = [...new Set(filtered.map(ym))].sort();
+    return { months, getM:r=>ym(r), lbl:m=>{const[y,mo]=m.split('-');return`${y.slice(2)}-${mo}월`;}, data:filtered };
+  } else {
+    const data = filtered.filter(r=>r._om!==null);
+    const ym = r => `${r._oy}-${String(r._om).padStart(2,'0')}`;
+    const months = [...new Set(data.map(ym))].sort();
+    return { months, getM:r=>ym(r), lbl:m=>{const[y,mo]=m.split('-');return`${y.slice(2)}-${mo}월`;}, data };
+  }
+}
+
+function renderAll() {
+  buildMetrics(); buildOverview(); buildRvoc();
+  buildPartner(); buildAgent(); buildMonthly();
+  buildOps(); buildMapping();
+}
+
+function setDateMode(mode, btn) {
+  dateMode=mode;
+  // 날짜 버튼만 on/off (통신사 버튼과 분리)
+  btn.closest('.dt-btns').querySelectorAll('.dt-btn').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+  drawerPages={};
+  renderAll();
+}
+
+function setCarrier(carrier, btn) {
+  carrierFilter=carrier;
+  btn.closest('.dt-btns').querySelectorAll('.dt-btn').forEach(b=>b.classList.remove('on'));
+  btn.classList.add('on');
+  drawerPages={};
+  renderAll();
+}
+
+// ══════════════════════════════════════════
+// 지표
+// ══════════════════════════════════════════
+function buildMetrics() {
+  const {data} = getMD();
+  const total=data.length;
+  const rv=data.filter(r=>r._isRvoc).length;
+  const regRv=data.filter(r=>(r['구분']||'').includes('R-VOC')).length;
+  const pSet=new Set(data.filter(r=>r._partner).map(r=>r._partner));
+  const aSet=new Set(data.filter(r=>r._agent).map(r=>r._agent));
+  const {minY,maxY} = G;
+  const periodLabel = minY===maxY?`${minY}년`:`${minY}~${maxY}년`;
+  const carrierLabel = carrierFilter==='전체'?'전체 통신사':carrierFilter;
+  document.getElementById('metrics').innerHTML=`
+    <div class="mc"><div class="mc-lbl">전체 인입</div><div class="mc-val">${total.toLocaleString()}</div><div class="mc-sub">${periodLabel} · ${dateMode==='reg'?'등록일':'개통일'} · ${carrierLabel}</div></div>
+    <div class="mc"><div class="mc-lbl">R-VOC 등록</div><div class="mc-val c-r">${regRv}</div><div class="mc-sub">${(regRv/total*100).toFixed(1)}%</div></div>
+    <div class="mc"><div class="mc-lbl">R-VOC급 패턴</div><div class="mc-val c-o">${rv}</div><div class="mc-sub">${(rv/total*100).toFixed(1)}%</div></div>
+    <div class="mc"><div class="mc-lbl">협력점 수</div><div class="mc-val c-b">${pSet.size}</div><div class="mc-sub">통합 후 기준</div></div>
+    <div class="mc"><div class="mc-lbl">담당자 수</div><div class="mc-val c-g">${aSet.size}</div><div class="mc-sub">시흥·천안·부천</div></div>
+  `;
+}
+
+// ══════════════════════════════════════════
+// 전체 현황
+// ══════════════════════════════════════════
+function buildOverview() {
+  const {months, getM, lbl, data} = getMD();
+  const pnl = document.getElementById('pnl-overview');
+  const typeCnt={}; data.forEach(r=>{const k=(r['구분']||'미분류').trim();typeCnt[k]=(typeCnt[k]||0)+1;});
+  const te=Object.entries(typeCnt).sort((a,b)=>b[1]-a[1]);
+  const cc={}; data.forEach(r=>{const k=(r['통신사']||'미상').trim();cc[k]=(cc[k]||0)+1;});
+  const ct=Object.entries(cc).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  const mt={}; months.forEach(m=>mt[m]=data.filter(r=>getM(r)===m).length);
+
+  pnl.innerHTML=`
+    <div class="g2">
+      <div class="card"><div class="card-h">구분별 인입</div><div style="position:relative;height:200px"><canvas id="c-type"></canvas></div></div>
+      <div class="card"><div class="card-h">통신사별 (상위 8)</div><div style="position:relative;height:200px"><canvas id="c-carrier"></canvas></div></div>
+    </div>
+    <div class="card"><div class="card-h">월별 VOC 인입</div><div style="position:relative;height:175px"><canvas id="c-mtotal"></canvas></div></div>
+  `;
+  makeChart('c-type',{type:'doughnut',data:{labels:te.map(e=>e[0]),datasets:[{data:te.map(e=>e[1]),backgroundColor:['#b91c1c','#1d4ed8','#c2410c','#15803d','#6d28d9','#aaa'],borderWidth:2,borderColor:'#fff'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{font:{size:11},boxWidth:12}}}}});
+  makeChart('c-carrier',{type:'bar',data:{labels:ct.map(e=>e[0]),datasets:[{data:ct.map(e=>e[1]),backgroundColor:'#1d4ed8',borderRadius:4,borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{font:{size:11}}},y:{grid:{color:'rgba(0,0,0,0.04)'},ticks:{font:{size:11}}}}}});
+  makeChart('c-mtotal',{type:'bar',data:{labels:months.map(lbl),datasets:[{data:months.map(m=>mt[m]),backgroundColor:'rgba(29,78,216,0.18)',borderColor:'#1d4ed8',borderWidth:1.5,borderRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{font:{size:11}}},y:{grid:{color:'rgba(0,0,0,0.04)'},ticks:{font:{size:11}}}}}});
+}
+
+// ══════════════════════════════════════════
+// R-VOC급 패턴 (기타 내용 서랍 포함)
+// ══════════════════════════════════════════
+const RCOLS={'강성/욕설':'#b91c1c','타사위약금 대납 불이행':'#b91c1c','이중가입/이중납부':'#b91c1c','사기/불법가입 주장':'#b91c1c','대외기관 언급':'#b91c1c','안내요금 vs 실청구 상이':'#c2410c','타사해지 누락':'#c2410c','단기가입 유도':'#c2410c'};
+
+function buildRvoc() {
+  const {months, getM, lbl, data} = getMD();
+  const total=data.length, rv=data.filter(r=>r._isRvoc).length;
+  const pc={}; Object.keys(RVOC_MAP).forEach(k=>pc[k]=0);
+  data.forEach(r=>r._rvoc.forEach(p=>pc[p]++));
+  const ps=Object.entries(pc).sort((a,b)=>b[1]-a[1]).filter(e=>e[1]>0);
+  const maxV=ps[0]?.[1]||1;
+
+  const patHtml=ps.map((e,i)=>{
+    const col=RCOLS[e[0]]||'#c2410c';
+    return `
+      <div class="pat-row" id="prow-${i}">
+        <span class="pr-no">${String(i+1).padStart(2,'0')}</span>
+        <span class="pr-name">${e[0]}</span>
+        <div class="pr-bar"><div class="pr-fill" style="width:${Math.round(e[1]/maxV*100)}%;background:${col}"></div></div>
+        <span class="pr-cnt" style="color:${col}">${e[1]}</span>
+        <button class="pr-detail" onclick="toggleDrawer('${e[0]}',${i})">내용 보기 ▾</button>
+      </div>
+      <div class="content-drawer" id="drawer-${i}"></div>
+    `;
+  }).join('');
+
+  const sKeys=Object.keys(RVOC_MAP);
+  const sCols=['#b91c1c','#dc2626','#ef4444','#c2410c','#ea580c','#d97706','#ca8a04','#7c3aed'];
+  const sDS=sKeys.map((k,i)=>({label:k,data:months.map(m=>{let c=0;data.filter(r=>getM(r)===m).forEach(r=>{if(r._rvoc.includes(k))c++;});return c;}),backgroundColor:sCols[i%sCols.length],borderWidth:0,borderRadius:2})).filter(ds=>ds.data.some(v=>v>0));
+  const rd=months.map(m=>{const s=data.filter(r=>getM(r)===m);return s.length?+(s.filter(r=>r._isRvoc).length/s.length*100).toFixed(1):0;});
+
+  document.getElementById('pnl-rvoc').innerHTML=`
+    <div class="g2">
+      <div class="card">
+        <div class="card-h">패턴별 건수 <span style="font-size:10px;color:var(--t3);font-weight:400;text-transform:none">— 내용 보기 클릭 시 기타 원문 표시 (10건씩)</span></div>
+        <div id="rvoc-list">${patHtml}</div>
+      </div>
+      <div class="card">
+        <div class="card-h">비율 / 월별 추이</div>
+        <div style="position:relative;height:130px;margin-bottom:12px"><canvas id="c-rv-donut"></canvas></div>
+        <div style="position:relative;height:115px"><canvas id="c-rv-line"></canvas></div>
+      </div>
+    </div>
+    <div class="card"><div class="card-h">월별 R-VOC급 패턴 스택</div><div style="position:relative;height:195px"><canvas id="c-rv-stack"></canvas></div></div>
+  `;
+  makeChart('c-rv-donut',{type:'doughnut',data:{labels:['R-VOC급','일반 VOC'],datasets:[{data:[rv,total-rv],backgroundColor:['#b91c1c','#e4e4e7'],borderWidth:2,borderColor:'#fff'}]},options:{responsive:true,maintainAspectRatio:false,cutout:'65%',plugins:{legend:{position:'bottom',labels:{font:{size:10},boxWidth:10}}}}});
+  makeChart('c-rv-line',{type:'line',data:{labels:months.map(lbl),datasets:[{data:rd,borderColor:'#b91c1c',backgroundColor:'rgba(185,28,28,0.07)',borderWidth:2,pointBackgroundColor:'#b91c1c',pointRadius:4,fill:true,tension:0.35}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{font:{size:10}}},y:{grid:{color:'rgba(0,0,0,0.04)'},ticks:{font:{size:10},callback:v=>v+'%'},min:0}}}});
+  makeChart('c-rv-stack',{type:'bar',data:{labels:months.map(lbl),datasets:sDS},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'bottom',labels:{font:{size:10},boxWidth:10}}},scales:{x:{stacked:true,grid:{display:false},ticks:{font:{size:11}}},y:{stacked:true,grid:{color:'rgba(0,0,0,0.04)'},ticks:{font:{size:11}}}}}});
+}
+
+// 서랍 토글
+function toggleDrawer(patName, idx) {
+  const el=document.getElementById('drawer-'+idx);
+  const btn=document.querySelector('#prow-'+idx+' .pr-detail');
+  if (!el) return;
+  if (el.classList.contains('open')) {
+    el.classList.remove('open'); btn.textContent='내용 보기 ▾'; return;
+  }
+  drawerPages[patName]=0;
+  renderDrawer(patName, idx);
+  el.classList.add('open'); btn.textContent='내용 닫기 ▴';
+}
+
+function renderDrawer(patName, idx) {
+  const el=document.getElementById('drawer-'+idx);
+  const {data}=getMD();
+  const PAGE=10;
+  const matches=data.filter(r=>r._rvoc.includes(patName)&&r['기타']&&r['기타'].trim());
+  if (!matches.length){ el.innerHTML='<div class="cd-empty">해당 내용 없음</div>'; return; }
+  const page=drawerPages[patName]||0;
+  const slice=matches.slice(0,(page+1)*PAGE);
+
+  const items=slice.map(r=>{
+    const txt=r['기타'].replace(/\n/g,' ').trim();
+    const m=dateMode==='reg'?r._rm:r._om;
+    const carrier=(r['통신사']||'').trim()||'—';
+    const gubun=(r['구분']||'').replace('발생','').trim()||'—';
+    const partner=r._partner||r._agent||'—';
+    const isRegRv=(r['구분']||'').includes('R-VOC');
+    return `<div class="cd-item">
+      <div class="cd-meta">
+        <span class="pill p-o">${m}월</span>
+        <span class="pill p-b">${esc(carrier)}</span>
+        <span class="pill ${isRegRv?'p-r':'p-p'}">${esc(gubun)}</span>
+        <span style="font-size:10px;color:var(--t2)">${esc(partner)}</span>
+      </div>
+      <div class="cd-text">${esc(txt)}</div>
+    </div>`;
+  }).join('');
+
+  const hasMore=slice.length<matches.length;
+  el.innerHTML=items+(hasMore
+    ?`<div class="cd-more" onclick="moreDrawer('${patName}',${idx})">더 보기 (${slice.length}/${matches.length}건) ▾</div>`
+    :`<div style="padding:8px 12px;font-size:10px;color:var(--t3);text-align:center">전체 ${matches.length}건 표시됨</div>`
+  );
+}
+
+function moreDrawer(patName, idx) {
+  drawerPages[patName]=(drawerPages[patName]||0)+1;
+  renderDrawer(patName, idx);
+}
+
+// ══════════════════════════════════════════
+// 협력점별
+// ══════════════════════════════════════════
+function buildPartner() {
+  const {data}=getMD();
+  const pMap={};
+  data.filter(r=>r._partner).forEach(r=>{
+    const k=r._partner;
+    if(!pMap[k]) pMap[k]={name:k,total:0,rvoc:0,rp:{},op:{},rows:[]};
+    pMap[k].total++;
+    pMap[k].rows.push(r);
+    if(r._isRvoc){pMap[k].rvoc++;r._rvoc.forEach(p=>pMap[k].rp[p]=(pMap[k].rp[p]||0)+1);}
+    r._ops.forEach(p=>pMap[k].op[p]=(pMap[k].op[p]||0)+1);
+  });
+  G._pd=Object.values(pMap).map(p=>({...p,rate:+(p.rvoc/p.total*100).toFixed(1)}));
+
+  document.getElementById('pnl-partner').innerHTML=`
+    <div class="fbar">
+      <span class="flbl">정렬</span>
+      <button class="fbtn on" onclick="partnerSort('rvoc',this)">R-VOC급 건수순</button>
+      <button class="fbtn" onclick="partnerSort('rate',this)">위험비율순</button>
+      <button class="fbtn" onclick="partnerSort('total',this)">전체건수순</button>
+      <span class="flbl" style="margin-left:8px">최소건수</span>
+      <button class="fbtn on" id="pm5" onclick="partnerMin(5,this)">5건+</button>
+      <button class="fbtn" id="pm10" onclick="partnerMin(10,this)">10건+</button>
+      <button class="fbtn" id="pm0" onclick="partnerMin(0,this)">전체</button>
+    </div>
+    <div id="partner-list"></div>
+  `;
+  renderPT();
+}
+
+function renderPT() {
+  const pd=G._pd||[];
+  let s=[...pd].filter(p=>p.total>=pMin);
+  if(pSort==='rvoc') s.sort((a,b)=>b.rvoc-a.rvoc||b.rate-a.rate);
+  else if(pSort==='rate') s.sort((a,b)=>b.rate-a.rate||b.rvoc-a.rvoc);
+  else s.sort((a,b)=>b.total-a.total);
+  const mx=Math.max(...s.map(p=>p.rvoc),1);
+
+  const html=s.map((p,i)=>{
+    const rp=Object.entries(p.rp).sort((a,b)=>b[1]-a[1]).slice(0,2).map(e=>`<span class="tag t-r">${e[0]} ${e[1]}</span>`).join('');
+    const op=Object.entries(p.op).sort((a,b)=>b[1]-a[1]).slice(0,1).map(e=>`<span class="tag t-o">${e[0]} ${e[1]}</span>`).join('');
+    const rc=p.rate>=20?'p-r':p.rate>=10?'p-o':'p-b';
+    return `<div style="border-bottom:1px solid var(--bd)">
+      <div style="display:flex;align-items:center;gap:10px;padding:8px 14px;cursor:pointer" onmouseover="this.style.background='#faf9f8'" onmouseout="this.style.background=''" onclick="toggleED('p',${i})">
+        <span style="font-family:var(--mono);font-size:10px;color:var(--t3);min-width:20px">${String(i+1).padStart(2,'0')}</span>
+        <span style="font-weight:600;flex:1;font-size:13px">${esc(p.name)}</span>
+        <span style="font-family:var(--mono);font-size:12px;color:var(--t2);min-width:36px">${p.total}건</span>
+        <span class="rbar"><div class="rb-bg"><div class="rb-f" style="width:${Math.round(p.rvoc/mx*100)}%;background:#b91c1c"></div></div><span style="font-family:var(--mono);font-size:12px;color:#b91c1c;min-width:20px;margin-left:4px">${p.rvoc}</span></span>
+        <span class="pill ${rc}" style="min-width:44px;text-align:center">${p.rate}%</span>
+        <span style="flex:1.5;font-size:11px">${rp||'—'}</span>
+        <span style="font-size:11px;min-width:100px">${op||'—'}</span>
+        <button class="pr-detail" id="pd-btn-${i}" style="pointer-events:none">R-VOC 이력 ▾</button>
+      </div>
+      <div class="content-drawer" id="pd-drawer-${i}"></div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('partner-list').innerHTML=`
+    <div style="background:var(--surface);border:1px solid var(--bd);border-radius:var(--r2);overflow:hidden">
+      <div style="display:flex;align-items:center;gap:10px;padding:7px 14px;background:var(--bg);border-bottom:1px solid var(--bd);font-size:10px;font-weight:600;color:var(--t3);letter-spacing:.05em;text-transform:uppercase">
+        <span style="min-width:20px"></span><span style="flex:1">협력점</span><span style="min-width:36px">전체</span>
+        <span style="min-width:90px">R-VOC급</span><span style="min-width:50px">비율</span>
+        <span style="flex:1.5">주요 R-VOC 패턴</span><span style="min-width:100px">운영 주의</span><span style="min-width:70px">VOC 이력</span>
+      </div>
+      ${html}
+    </div>`;
+}
+
+// ── 공통 서랍 (협력점/담당자 공용) ──
+function toggleED(type, idx) {
+  const el=document.getElementById(`p${type==='p'?'d':'a'}-drawer-${idx}`);
+  const btn=document.getElementById(`p${type==='p'?'d':'a'}-btn-${idx}`);
+  if(!el) return;
+  if(el.classList.contains('open')){el.classList.remove('open');if(btn)btn.textContent='R-VOC 이력 ▾';return;}
+  drawerPages[type+'_'+idx]=0;
+  renderED(type,idx);
+  el.classList.add('open');
+  if(btn)btn.textContent='R-VOC 이력 ▴';
+}
+
+function renderED(type, idx) {
+  const elId=`p${type==='p'?'d':'a'}-drawer-${idx}`;
+  const el=document.getElementById(elId);
+  const PAGE=10;
+  const {data,getM}=getMD();
+  let allRows=[];
+
+  if(type==='p'){
+    const pd=G._pd||[];
+    let s=[...pd].filter(p=>p.total>=pMin);
+    if(pSort==='rvoc') s.sort((a,b)=>b.rvoc-a.rvoc||b.rate-a.rate);
+    else if(pSort==='rate') s.sort((a,b)=>b.rate-a.rate||b.rvoc-a.rvoc);
+    else s.sort((a,b)=>b.total-a.total);
+    // R-VOC급 건만 표시
+    allRows=(s[idx]?.rows||[]).filter(r=>r._isRvoc && r['기타']&&r['기타'].trim());
+  } else {
+    const ad=G._ad||[];
+    let f=ad.filter(a=>aRegion==='전체'||a.region===aRegion);
+    if(aSort==='total') f.sort((a,b)=>b.total-a.total);
+    else if(aSort==='rvoc') f.sort((a,b)=>b.rvoc-a.rvoc||b.rate-a.rate);
+    else f.sort((a,b)=>b.rate-a.rate||b.rvoc-a.rvoc);
+    const agentName=f[idx]?.name;
+    // R-VOC급 건만 표시
+    allRows=agentName?data.filter(r=>r._agent===agentName&&r._isRvoc&&r['기타']&&r['기타'].trim()):[];
+  }
+
+  const key=type+'_'+idx;
+  const page=drawerPages[key]||0;
+  const slice=allRows.slice(0,(page+1)*PAGE);
+  if(!slice.length){el.innerHTML='<div class="cd-empty">기타 내용 없음</div>';return;}
+
+  const items=slice.map(r=>{
+    const txt=r['기타'].replace(/\n/g,' ').trim();
+    const m=getM(r)||'—';
+    const carrier=(r['통신사']||'').trim()||'—';
+    const gubun=(r['구분']||'').replace('발생','').trim()||'—';
+    const isRv=(r['구분']||'').includes('R-VOC');
+    const rvTags=r._rvoc.map(p=>`<span class="tag t-r">${p}</span>`).join('');
+    const opTags=r._ops.map(p=>`<span class="tag t-o">${p}</span>`).join('');
+    return `<div class="cd-item">
+      <div class="cd-meta">
+        <span class="pill p-o">${m}월</span>
+        <span class="pill p-b">${esc(carrier)}</span>
+        <span class="pill ${isRv?'p-r':'p-p'}">${esc(gubun)}</span>
+        ${rvTags}${opTags}
+      </div>
+      <div class="cd-text">${esc(txt)}</div>
+    </div>`;
+  }).join('');
+
+  const hasMore=slice.length<allRows.length;
+  el.innerHTML=items+(hasMore
+    ?`<div class="cd-more" onclick="moreED('${type}',${idx})">더 보기 (${slice.length}/${allRows.length}건) ▾</div>`
+    :`<div style="padding:8px 12px;font-size:10px;color:var(--t3);text-align:center">전체 ${allRows.length}건</div>`
+  );
+}
+
+function moreED(type,idx){
+  drawerPages[type+'_'+idx]=(drawerPages[type+'_'+idx]||0)+1;
+  renderED(type,idx);
+}
+
+function partnerSort(by,btn){
+  pSort=by;
+  document.querySelectorAll('#pnl-partner .fbar .fbtn').forEach(b=>{if(['R-VOC급 건수순','위험비율순','전체건수순'].some(t=>b.textContent.includes(t)))b.classList.remove('on');});
+  btn.classList.add('on'); renderPT();
+}
+function partnerMin(min,btn){
+  pMin=min;
+  document.querySelectorAll('#pnl-partner .fbar .fbtn').forEach(b=>{if(b.id&&b.id.startsWith('pm'))b.classList.remove('on');});
+  btn.classList.add('on'); renderPT();
+}
+
+// ══════════════════════════════════════════
+// 담당자별
+// ══════════════════════════════════════════
+function buildAgent() {
+  const {data}=getMD();
+  const aMap={};
+  data.filter(r=>r._agent).forEach(r=>{
+    const k=r._agent;
+    if(!aMap[k]) aMap[k]={name:k,region:k.split(' ')[0],total:0,rvoc:0,rp:{}};
+    aMap[k].total++;
+    if(r._isRvoc){aMap[k].rvoc++;r._rvoc.forEach(p=>aMap[k].rp[p]=(aMap[k].rp[p]||0)+1);}
+  });
+  G._ad=Object.values(aMap).map(a=>({...a,rate:+(a.rvoc/a.total*100).toFixed(1)}));
+
+  document.getElementById('pnl-agent').innerHTML=`
+    <div class="fbar">
+      <span class="flbl">정렬</span>
+      <button class="fbtn on" onclick="agentSort('total',this)">전체건수순</button>
+      <button class="fbtn" onclick="agentSort('rvoc',this)">R-VOC급순</button>
+      <button class="fbtn" onclick="agentSort('rate',this)">위험비율순</button>
+      <span class="flbl" style="margin-left:8px">지역</span>
+      <button class="fbtn on" id="ar-all" onclick="agentRegion('전체',this)">전체</button>
+      <button class="fbtn" id="ar-si" onclick="agentRegion('시흥',this)">시흥</button>
+      <button class="fbtn" id="ar-ch" onclick="agentRegion('천안',this)">천안</button>
+      <button class="fbtn" id="ar-bc" onclick="agentRegion('부천',this)">부천</button>
+    </div>
+    <div id="agent-list"></div>
+  `;
+  renderAT();
+}
+
+function renderAT() {
+  const ad=G._ad||[];
+  const regCol={'시흥':'#1d4ed8','천안':'#c2410c','부천':'#15803d'};
+  let f=ad.filter(a=>aRegion==='전체'||a.region===aRegion);
+  if(aSort==='total') f.sort((a,b)=>b.total-a.total);
+  else if(aSort==='rvoc') f.sort((a,b)=>b.rvoc-a.rvoc||b.rate-a.rate);
+  else f.sort((a,b)=>b.rate-a.rate||b.rvoc-a.rvoc);
+  const mx=Math.max(...f.map(a=>a.total),1);
+
+  const html=f.map((a,i)=>{
+    const tp=Object.entries(a.rp).sort((a,b)=>b[1]-a[1]).slice(0,2).map(e=>`<span class="tag t-r">${e[0]} ${e[1]}</span>`).join('')||'—';
+    const col=regCol[a.region]||'#555';
+    const rp=a.rate>=20?'p-r':a.rate>=10?'p-o':a.rvoc>0?'p-b':'';
+    const shortName=a.name.split(' ').slice(1).join(' ');
+    return `<div style="border-bottom:1px solid var(--bd)">
+      <div style="display:flex;align-items:center;gap:10px;padding:8px 14px;cursor:pointer" onmouseover="this.style.background='#faf9f8'" onmouseout="this.style.background=''" onclick="toggleED('a',${i})">
+        <span style="font-family:var(--mono);font-size:10px;color:var(--t3);min-width:20px">${String(i+1).padStart(2,'0')}</span>
+        <span style="font-weight:600;flex:0 0 70px">${esc(shortName)}</span>
+        <span class="pill" style="background:${col}1a;color:${col};flex:0 0 40px;text-align:center">${a.region}</span>
+        <span class="rbar" style="flex:0 0 90px"><div class="rb-bg"><div class="rb-f" style="width:${Math.round(a.total/mx*100)}%;background:${col}"></div></div><span style="font-family:var(--mono);font-size:12px;margin-left:4px">${a.total}</span></span>
+        <span style="font-family:var(--mono);color:#b91c1c;min-width:20px">${a.rvoc}</span>
+        <span style="min-width:52px">${a.rvoc>0?`<span class="pill ${rp}">${a.rate}%</span>`:'—'}</span>
+        <span style="flex:1;font-size:11px">${tp}</span>
+        <button class="pr-detail" id="pa-btn-${i}" style="pointer-events:none">R-VOC 이력 ▾</button>
+      </div>
+      <div class="content-drawer" id="pa-drawer-${i}"></div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('agent-list').innerHTML=`
+    <div style="background:var(--surface);border:1px solid var(--bd);border-radius:var(--r2);overflow:hidden">
+      <div style="display:flex;align-items:center;gap:10px;padding:7px 14px;background:var(--bg);border-bottom:1px solid var(--bd);font-size:10px;font-weight:600;color:var(--t3);letter-spacing:.05em;text-transform:uppercase">
+        <span style="min-width:20px"></span><span style="flex:0 0 70px">담당자</span><span style="flex:0 0 40px">지역</span>
+        <span style="flex:0 0 90px">전체건수</span><span style="min-width:20px">R-VOC</span>
+        <span style="min-width:52px">비율</span><span style="flex:1">주요 패턴</span><span style="min-width:70px">VOC 이력</span>
+      </div>
+      ${html}
+    </div>`;
+}
+
+function agentSort(by,btn){
+  aSort=by;
+  document.querySelectorAll('#pnl-agent .fbar .fbtn').forEach(b=>{if(['전체건수순','R-VOC급순','위험비율순'].some(t=>b.textContent.includes(t)))b.classList.remove('on');});
+  btn.classList.add('on'); renderAT();
+}
+function agentRegion(r,btn){
+  aRegion=r;
+  document.querySelectorAll('#pnl-agent .fbar .fbtn').forEach(b=>{if(b.id&&b.id.startsWith('ar-'))b.classList.remove('on');});
+  btn.classList.add('on'); renderAT();
+}
+
+// ══════════════════════════════════════════
+// 월별 추이
+// ══════════════════════════════════════════
+function buildMonthly() {
+  const {months,getM,lbl,data}=getMD();
+  const rows=months.map(m=>{
+    const sub=data.filter(r=>getM(r)===m);
+    const tot=sub.length, regRv=sub.filter(r=>(r['구분']||'').includes('R-VOC')).length;
+    const rv=sub.filter(r=>r._isRvoc).length, rate=(rv/tot*100).toFixed(1);
+    const pc={}; sub.forEach(r=>r._rvoc.forEach(p=>pc[p]=(pc[p]||0)+1));
+    const top=Object.entries(pc).sort((a,b)=>b[1]-a[1]).slice(0,2).map(e=>`${e[0]} ${e[1]}건`).join(', ')||'—';
+    const rc=+rate>=10?'p-r':+rate>=7?'p-o':'p-b';
+    return `<tr><td><strong>${lbl(m)}</strong></td><td style="font-family:var(--mono)">${tot.toLocaleString()}</td><td style="font-family:var(--mono)">${regRv}</td><td style="font-family:var(--mono);color:#b91c1c">${rv}</td><td><span class="pill ${rc}">${rate}%</span></td><td style="font-size:11px;color:var(--t2)">${top}</td></tr>`;
+  });
+  document.getElementById('pnl-monthly').innerHTML=`
+    <div class="card" style="margin-bottom:10px">
+      <table class="tbl"><thead><tr><th>월</th><th>전체</th><th>R-VOC 등록</th><th>R-VOC급</th><th>비율</th><th>주요 패턴 (상위 2)</th></tr></thead>
+      <tbody>${rows.join('')}</tbody></table>
+    </div>
+    <div class="card"><div class="card-h">R-VOC급 비율 추이</div><div style="position:relative;height:185px"><canvas id="c-rate"></canvas></div></div>
+  `;
+  const rd=months.map(m=>{const s=data.filter(r=>getM(r)===m);return s.length?+(s.filter(r=>r._isRvoc).length/s.length*100).toFixed(1):0;});
+  makeChart('c-rate',{type:'line',data:{labels:months.map(lbl),datasets:[{data:rd,borderColor:'#b91c1c',backgroundColor:'rgba(185,28,28,0.07)',borderWidth:2,pointBackgroundColor:'#b91c1c',pointRadius:5,fill:true,tension:0.35}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{grid:{display:false},ticks:{font:{size:11}}},y:{grid:{color:'rgba(0,0,0,0.04)'},ticks:{font:{size:11},callback:v=>v+'%'},min:0}}}});
+}
+
+// ══════════════════════════════════════════
+// 운영 주의
+// ══════════════════════════════════════════
+function buildOps() {
+  const {data}=getMD();
+  const oc={}; Object.keys(OPS_MAP).forEach(k=>oc[k]=0);
+  data.forEach(r=>r._ops.forEach(p=>oc[p]++));
+  const os=Object.entries(oc).sort((a,b)=>b[1]-a[1]).filter(e=>e[1]>0);
+  const mx=os[0]?.[1]||1;
+  const listHtml=os.map((e,i)=>`
+    <div class="pat-row">
+      <span class="pr-no">${String(i+1).padStart(2,'0')}</span>
+      <span class="pr-name">${e[0]}</span>
+      <div class="pr-bar"><div class="pr-fill" style="width:${Math.round(e[1]/mx*100)}%;background:#c2410c"></div></div>
+      <span class="pr-cnt" style="color:#c2410c">${e[1]}</span>
+    </div>`).join('');
+  document.getElementById('pnl-ops').innerHTML=`
+    <div class="g2">
+      <div class="card"><div class="card-h">패턴별 건수</div>${listHtml}</div>
+      <div class="card"><div class="card-h">분포</div><div style="position:relative;height:250px"><canvas id="c-ops"></canvas></div></div>
+    </div>
+  `;
+  makeChart('c-ops',{type:'doughnut',data:{labels:os.map(e=>e[0]),datasets:[{data:os.map(e=>e[1]),backgroundColor:['#c2410c','#ea580c','#f97316','#f59e0b','#15803d','#0891b2','#1d4ed8','#7c3aed'],borderWidth:2,borderColor:'#fff'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{font:{size:11},boxWidth:12}}}}});
+}
+
+// ══════════════════════════════════════════
+// 업체 매핑 편집기
+// ══════════════════════════════════════════
+function buildMapping() {
+  renderMappingUI();
+}
+
+function renderMappingUI() {
+  const pnl=document.getElementById('pnl-mapping');
+  const listHtml=MAPPING.map((m,i)=>`
+    <div class="me-row">
+      <span class="me-canon">${esc(m.c)}</span>
+      <span class="me-aliases">${esc(m.a.join(', '))}</span>
+      <button class="me-del" onclick="delMap(${i})">삭제</button>
+    </div>`).join('');
+  pnl.innerHTML=`
+    <div class="me-wrap">
+      <div class="me-title">업체명 통합 매핑 <span class="me-badge">파일 업로드 시 자동 적용</span></div>
+      <div class="me-list" id="me-list">${listHtml}</div>
+      <div class="me-add">
+        <input class="me-inp" id="inp-c" placeholder="대표명 (예: BCY)" style="width:130px">
+        <input class="me-inp" id="inp-a" placeholder="같은 업체 이름들 — 쉼표로 구분 (예: 비씨와이, bcy, 비씨와이BCY)" style="flex:1;min-width:200px">
+        <button class="btn-add" onclick="addMap()">+ 추가</button>
+      </div>
+      <div class="me-note">* 추가/삭제 시 현재 분석에 즉시 반영됩니다. 페이지 새로고침 시 초기값으로 돌아갑니다.</div>
+    </div>
+    <div class="card">
+      <div class="card-h">현재 매핑 현황 (${MAPPING.length}개 그룹)</div>
+      <table class="tbl"><thead><tr><th>대표명</th><th>통합된 이름 수</th><th>포함 이름</th></tr></thead>
+      <tbody>${MAPPING.map(m=>`<tr><td style="font-weight:600">${esc(m.c)}</td><td style="font-family:var(--mono)">${m.a.length}개</td><td style="font-size:11px;color:var(--t2)">${esc(m.a.slice(0,5).join(', '))}${m.a.length>5?` 외 ${m.a.length-5}개`:''}</td></tr>`).join('')}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function addMap() {
+  const c=document.getElementById('inp-c').value.trim();
+  const aStr=document.getElementById('inp-a').value.trim();
+  if(!c||!aStr){alert('대표명과 이름 목록을 모두 입력해주세요.');return;}
+  const a=aStr.split(',').map(x=>x.trim()).filter(x=>x);
+  if(!a.length){alert('이름을 입력해주세요.');return;}
+  MAPPING.push({c,a});
+  if(G.allData){G.allData.forEach(r=>r._partner=getPartner(r));renderAll();}
+  else renderMappingUI();
+}
+function delMap(idx) {
+  if(!confirm(`"${MAPPING[idx].c}" 매핑을 삭제할까요?`)) return;
+  MAPPING.splice(idx,1);
+  if(G.allData){G.allData.forEach(r=>r._partner=getPartner(r));renderAll();}
+  else renderMappingUI();
+}
+
+// ══════════════════════════════════════════
+// 탭 전환
+// ══════════════════════════════════════════
+const TABS=['overview','rvoc','partner','agent','monthly','ops','mapping'];
+function sw(id){
+  document.querySelectorAll('.tb').forEach((b,i)=>b.classList.toggle('on',TABS[i]===id));
+  document.querySelectorAll('.pnl').forEach(p=>p.classList.toggle('on',p.id==='pnl-'+id));
+}
+</script>
+</body>
+</html>
