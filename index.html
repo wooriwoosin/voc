@@ -174,7 +174,8 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--t1);
   </div>
   <div class="spec">
     <div class="spec-hd">필수 컬럼</div>
-    <div class="spec-row">등록일, 구분, 통신사, 기타, 개통일자</div>
+    <div class="spec-row">구분, 통신사, 기타 + 날짜 컬럼 1개 이상</div>
+    <div class="spec-row">날짜 기준: 최초등록일(등록일) · 접수일자 · 개통일자</div>
     <div class="spec-row">유치자정보(수기입력) — 협력점·담당자 분류</div>
   </div>
   <div class="err" id="err"></div>
@@ -198,10 +199,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--t1);
     <div class="ctrl-bar">
       <div class="date-toggle">
         <span class="dt-label">날짜 기준</span>
-        <div class="dt-btns">
-          <button class="dt-btn on" onclick="setDateMode('reg',this)">등록일(발생일)</button>
-          <button class="dt-btn" onclick="setDateMode('open',this)">개통일자</button>
-        </div>
+        <div class="dt-btns" id="dm-btns"></div>
       </div>
       <div class="date-toggle">
         <span class="dt-label">통신사</span>
@@ -391,7 +389,28 @@ function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').rep
 // 전역 상태
 // ══════════════════════════════════════════
 let G = {};
-let dateMode = 'reg';
+let dateMode = 'first';
+// 날짜 기준 — cols 중 CSV에 먼저 발견되는 컬럼을 사용
+const DATE_MODES = [
+  // Works 시스템 '등록일' = 건이 처음 등록된 시각 (수정일과 별개)
+  {key:'first', label:'최초등록일', cols:['최초등록일','최초 등록일','최초등록일자','등록일','등록일자','등록일시']},
+  {key:'recv',  label:'접수일',     cols:['접수일','접수일자','접수일시','접수 일자','접수날짜']},
+  {key:'open',  label:'개통일',     cols:['개통일자','개통일','개통 일자','개통일시']},
+];
+const modeLabel = k => (DATE_MODES.find(m=>m.key===k)||{}).label||k;
+
+// 다양한 날짜 표기 파싱: 2026-11-03 13:27 / 2026.11.03 / 2026/11/03 / 20261103 / 2026년 11월 3일
+function parseDate(v) {
+  const s = String(v||'').trim();
+  if (!s || s==='nan' || s==='-') return null;
+  let m = s.match(/^(\d{4})\s*[-./년]\s*(\d{1,2})\s*[-./월]\s*(\d{1,2})/) || s.match(/^(\d{4})(\d{2})(\d{2})(?!\d)/);
+  if (m) {
+    const d = new Date(+m[1], +m[2]-1, +m[3]);
+    return isNaN(d) ? null : d;
+  }
+  const d = new Date(s);
+  return isNaN(d) ? null : d;
+}
 let carrierFilter = '전체';
 let pSort = 'rvoc', pMin = 5;
 let aSort = 'total', aRegion = '전체';
@@ -439,27 +458,35 @@ function resetApp() {
 // 데이터 초기화
 // ══════════════════════════════════════════
 function initDB(raw, filename) {
-  const cols = Object.keys(raw[0]||{});
+  const cols = Object.keys(raw[0]||{}).map(c=>c.replace(/^\uFEFF/,''));
+  if (raw.length && Object.keys(raw[0])[0].startsWith('\uFEFF')) {
+    const bad = Object.keys(raw[0])[0], good = bad.replace(/^\uFEFF/,'');
+    raw.forEach(r=>{ r[good]=r[bad]; delete r[bad]; });
+  }
   if (!cols.includes('기타')) throw new Error("'기타' 컬럼을 찾을 수 없습니다.");
-  if (!cols.includes('등록일')) throw new Error("'등록일' 컬럼을 찾을 수 없습니다.");
+
+  // 날짜 기준별 사용할 컬럼 탐지
+  const dateCols = {};
+  DATE_MODES.forEach(m => { const c = m.cols.find(x=>cols.includes(x)); if (c) dateCols[m.key]=c; });
+  if (!Object.keys(dateCols).length)
+    throw new Error('날짜 컬럼(등록일/접수일자/개통일자)을 찾을 수 없습니다.');
 
   const rows = raw.map(r => {
-    const d = new Date(r['등록일']);
-    const od = r['개통일자'] ? new Date(r['개통일자']) : null;
-    return {...r,
-      _rd:d, _od:od,
-      _ry:d.getFullYear(), _rm:d.getMonth()+1,
-      _om: od&&!isNaN(od) ? od.getMonth()+1 : null,
-      _oy: od&&!isNaN(od) ? od.getFullYear() : null,
-      _ok:!isNaN(d)
-    };
+    const _ym = {};
+    for (const k in dateCols) {
+      const d = parseDate(r[dateCols[k]]);
+      _ym[k] = d ? `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}` : null;
+    }
+    return {...r, _ym, _ok:Object.values(_ym).some(Boolean)};
   }).filter(r=>r._ok);
 
   const allData = rows;
   if (!allData.length) throw new Error('데이터가 없습니다.');
 
-  const minY = Math.min(...allData.map(r=>r._ry));
-  const maxY = Math.max(...allData.map(r=>r._ry));
+  // 기본 날짜 기준: 최초등록일 → 접수일 → 개통일 순으로 데이터가 있는 것
+  dateMode = DATE_MODES.map(m=>m.key).find(k=>dateCols[k]);
+  const yrs = allData.map(r=>r._ym[dateMode]).filter(Boolean).map(v=>+v.slice(0,4));
+  const minY = Math.min(...yrs), maxY = Math.max(...yrs);
   const periodLabel = minY===maxY ? `${minY}년` : `${minY}~${maxY}년`;
 
   allData.forEach(r => {
@@ -469,7 +496,12 @@ function initDB(raw, filename) {
     r._partner=getPartner(r); r._agent=getAgent(r);
   });
 
-  G = {allData, minY, maxY, filename};
+  G = {allData, filename, dateCols};
+  document.getElementById('dm-btns').innerHTML = DATE_MODES.map(m => {
+    const has = !!dateCols[m.key];
+    const cnt = has ? allData.filter(r=>r._ym[m.key]).length : 0;
+    return `<button class="dt-btn${m.key===dateMode?' on':''}"${has?` onclick="setDateMode('${m.key}',this)" title="'${dateCols[m.key]}' 컬럼 기준 · ${cnt.toLocaleString()}건"`:` disabled style="opacity:.35;cursor:not-allowed" title="CSV에 ${m.label} 컬럼이 없습니다"`}>${m.label}</button>`;
+  }).join('');
   document.getElementById('tb-title').textContent = `${periodLabel} VOC 분석`;
   document.getElementById('tb-meta').textContent = `${filename} · ${allData.length.toLocaleString()}건`;
 
@@ -497,16 +529,11 @@ function getMD() {
     : carrierFilter==='기타' ? allData.filter(r=>!['KT','LG U+','SKT','SKYLIFE','SKB'].includes((r['통신사']||'').trim()))
     : allData.filter(r=>(r['통신사']||'').trim()===carrierFilter);
 
-  if (dateMode==='reg') {
-    const ym = r => `${r._ry}-${String(r._rm).padStart(2,'0')}`;
-    const months = [...new Set(filtered.map(ym))].sort();
-    return { months, getM:r=>ym(r), lbl:m=>{const[y,mo]=m.split('-');return`${y.slice(2)}-${mo}월`;}, data:filtered };
-  } else {
-    const data = filtered.filter(r=>r._om!==null);
-    const ym = r => `${r._oy}-${String(r._om).padStart(2,'0')}`;
-    const months = [...new Set(data.map(ym))].sort();
-    return { months, getM:r=>ym(r), lbl:m=>{const[y,mo]=m.split('-');return`${y.slice(2)}-${mo}월`;}, data };
-  }
+  // 선택한 날짜 기준 값이 없는 행은 제외
+  const data = filtered.filter(r=>r._ym[dateMode]);
+  const ym = r => r._ym[dateMode];
+  const months = [...new Set(data.map(ym))].sort();
+  return { months, getM:ym, lbl:m=>{const[y,mo]=m.split('-');return`${y.slice(2)}-${mo}월`;}, data };
 }
 
 function renderAll() {
@@ -537,16 +564,18 @@ function setCarrier(carrier, btn) {
 // ══════════════════════════════════════════
 function buildMetrics() {
   const {data} = getMD();
-  const total=data.length;
+  const total=data.length||1;
+  const cnt=data.length;
   const rv=data.filter(r=>r._isRvoc).length;
   const regRv=data.filter(r=>(r['구분']||'').includes('R-VOC')).length;
   const pSet=new Set(data.filter(r=>r._partner).map(r=>r._partner));
   const aSet=new Set(data.filter(r=>r._agent).map(r=>r._agent));
-  const {minY,maxY} = G;
+  const yrs = data.map(r=>+r._ym[dateMode].slice(0,4));
+  const minY = yrs.length?Math.min(...yrs):'-', maxY = yrs.length?Math.max(...yrs):'-';
   const periodLabel = minY===maxY?`${minY}년`:`${minY}~${maxY}년`;
   const carrierLabel = carrierFilter==='전체'?'전체 통신사':carrierFilter;
   document.getElementById('metrics').innerHTML=`
-    <div class="mc"><div class="mc-lbl">전체 인입</div><div class="mc-val">${total.toLocaleString()}</div><div class="mc-sub">${periodLabel} · ${dateMode==='reg'?'등록일':'개통일'} · ${carrierLabel}</div></div>
+    <div class="mc"><div class="mc-lbl">전체 인입</div><div class="mc-val">${cnt.toLocaleString()}</div><div class="mc-sub">${periodLabel} · ${modeLabel(dateMode)} 기준 · ${carrierLabel}</div></div>
     <div class="mc"><div class="mc-lbl">R-VOC 등록</div><div class="mc-val c-r">${regRv}</div><div class="mc-sub">${(regRv/total*100).toFixed(1)}%</div></div>
     <div class="mc"><div class="mc-lbl">R-VOC급 패턴</div><div class="mc-val c-o">${rv}</div><div class="mc-sub">${(rv/total*100).toFixed(1)}%</div></div>
     <div class="mc"><div class="mc-lbl">협력점 수</div><div class="mc-val c-b">${pSet.size}</div><div class="mc-sub">통합 후 기준</div></div>
@@ -653,7 +682,7 @@ function renderDrawer(patName, idx) {
 
   const items=slice.map(r=>{
     const txt=r['기타'].replace(/\n/g,' ').trim();
-    const m=dateMode==='reg'?r._rm:r._om;
+    const m=+r._ym[dateMode].slice(5,7);
     const carrier=(r['통신사']||'').trim()||'—';
     const gubun=(r['구분']||'').replace('발생','').trim()||'—';
     const partner=r._partner||r._agent||'—';
