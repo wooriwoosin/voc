@@ -38,6 +38,13 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--t1);
 .spec-hd{font-size:10px;font-weight:600;color:var(--t3);letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px}
 .spec-row{font-size:12px;color:var(--t2);padding:2px 0;display:flex;align-items:baseline;gap:6px}
 .spec-row::before{content:'›';color:var(--t3);font-size:10px}
+.daou{margin-top:1rem;max-width:500px;width:100%;background:var(--card);border:1px solid var(--blu-m);border-radius:var(--r2);padding:1rem 1.25rem}
+.daou-hd{font-size:13px;font-weight:600;margin-bottom:8px;color:var(--blu)}
+.daou ol{padding-left:1.1rem;font-size:12px;color:var(--t2)}
+.daou li{padding:2px 0}
+.bm-link{display:inline-block;margin:6px 0 2px;padding:6px 14px;background:var(--blu);color:#fff;border-radius:8px;text-decoration:none;font-weight:600;font-size:12px;cursor:grab}
+.daou-note{font-size:11px;color:var(--t3);margin-top:6px}
+#recv{display:none;position:fixed;inset:0;background:rgba(240,237,232,.92);z-index:500;align-items:center;justify-content:center;flex-direction:column;gap:8px;font-size:15px}
 .err{display:none;margin-top:1rem;max-width:500px;width:100%;padding:10px 14px;background:var(--red-s);border:1px solid var(--red-m);border-radius:var(--r);font-size:12px;color:var(--red)}
 
 /* 대시보드 */
@@ -174,11 +181,23 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--t1);
   </div>
   <div class="spec">
     <div class="spec-hd">필수 컬럼</div>
-    <div class="spec-row">등록일, 구분, 통신사, 기타, 개통일자</div>
+    <div class="spec-row">구분, 통신사, 기타 + 날짜 컬럼 1개 이상</div>
+    <div class="spec-row">날짜 기준: 최초등록일(등록일) · 접수일자 · 개통일자</div>
     <div class="spec-row">유치자정보(수기입력) — 협력점·담당자 분류</div>
+  </div>
+  <div class="daou">
+    <div class="daou-hd">⚡ 다우오피스에서 바로 가져오기 (북마크)</div>
+    <ol>
+      <li>아래 버튼을 <b>북마크바로 끌어다 놓기</b> — 처음 한 번만 (북마크바가 안 보이면 Ctrl+Shift+B)<br>
+        <a class="bm-link" id="bm-link" href="#" onclick="alert('클릭하지 말고 북마크바로 끌어다 놓아주세요!');return false;">📥 VOC 가져오기</a></li>
+      <li>다우오피스 로그인 → Works → <b>VOC/고객인입관리</b> 목록 화면 열기</li>
+      <li>북마크바의 <b>📥 VOC 가져오기</b> 클릭 → 전체 건 자동 수집</li>
+    </ol>
+    <div class="daou-note" id="bm-note"></div>
   </div>
   <div class="err" id="err"></div>
 </div>
+<div id="recv"><div>📥 다우오피스에서 수집 중…</div><div style="font-size:12px;color:var(--t2)">다우오피스 창 오른쪽 위 진행 상황을 확인하세요. 끝나면 자동으로 열립니다.</div></div>
 
 <!-- 대시보드 -->
 <div id="db">
@@ -198,10 +217,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--t1);
     <div class="ctrl-bar">
       <div class="date-toggle">
         <span class="dt-label">날짜 기준</span>
-        <div class="dt-btns">
-          <button class="dt-btn on" onclick="setDateMode('reg',this)">등록일(발생일)</button>
-          <button class="dt-btn" onclick="setDateMode('open',this)">개통일자</button>
-        </div>
+        <div class="dt-btns" id="dm-btns"></div>
       </div>
       <div class="date-toggle">
         <span class="dt-label">통신사</span>
@@ -391,7 +407,28 @@ function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').rep
 // 전역 상태
 // ══════════════════════════════════════════
 let G = {};
-let dateMode = 'reg';
+let dateMode = 'first';
+// 날짜 기준 — cols 중 CSV에 먼저 발견되는 컬럼을 사용
+const DATE_MODES = [
+  // Works 시스템 '등록일' = 건이 처음 등록된 시각 (수정일과 별개)
+  {key:'first', label:'최초등록일', cols:['최초등록일','최초 등록일','최초등록일자','등록일','등록일자','등록일시']},
+  {key:'recv',  label:'접수일',     cols:['접수일','접수일자','접수일시','접수 일자','접수날짜']},
+  {key:'open',  label:'개통일',     cols:['개통일자','개통일','개통 일자','개통일시']},
+];
+const modeLabel = k => (DATE_MODES.find(m=>m.key===k)||{}).label||k;
+
+// 다양한 날짜 표기 파싱: 2026-11-03 13:27 / 2026.11.03 / 2026/11/03 / 20261103 / 2026년 11월 3일
+function parseDate(v) {
+  const s = String(v||'').trim();
+  if (!s || s==='nan' || s==='-') return null;
+  let m = s.match(/^(\d{4})\s*[-./년]\s*(\d{1,2})\s*[-./월]\s*(\d{1,2})/) || s.match(/^(\d{4})(\d{2})(\d{2})(?!\d)/);
+  if (m) {
+    const d = new Date(+m[1], +m[2]-1, +m[3]);
+    return isNaN(d) ? null : d;
+  }
+  const d = new Date(s);
+  return isNaN(d) ? null : d;
+}
 let carrierFilter = '전체';
 let pSort = 'rvoc', pMin = 5;
 let aSort = 'total', aRegion = '전체';
@@ -439,27 +476,35 @@ function resetApp() {
 // 데이터 초기화
 // ══════════════════════════════════════════
 function initDB(raw, filename) {
-  const cols = Object.keys(raw[0]||{});
+  const cols = Object.keys(raw[0]||{}).map(c=>c.replace(/^\uFEFF/,''));
+  if (raw.length && Object.keys(raw[0])[0].startsWith('\uFEFF')) {
+    const bad = Object.keys(raw[0])[0], good = bad.replace(/^\uFEFF/,'');
+    raw.forEach(r=>{ r[good]=r[bad]; delete r[bad]; });
+  }
   if (!cols.includes('기타')) throw new Error("'기타' 컬럼을 찾을 수 없습니다.");
-  if (!cols.includes('등록일')) throw new Error("'등록일' 컬럼을 찾을 수 없습니다.");
+
+  // 날짜 기준별 사용할 컬럼 탐지
+  const dateCols = {};
+  DATE_MODES.forEach(m => { const c = m.cols.find(x=>cols.includes(x)); if (c) dateCols[m.key]=c; });
+  if (!Object.keys(dateCols).length)
+    throw new Error('날짜 컬럼(등록일/접수일자/개통일자)을 찾을 수 없습니다.');
 
   const rows = raw.map(r => {
-    const d = new Date(r['등록일']);
-    const od = r['개통일자'] ? new Date(r['개통일자']) : null;
-    return {...r,
-      _rd:d, _od:od,
-      _ry:d.getFullYear(), _rm:d.getMonth()+1,
-      _om: od&&!isNaN(od) ? od.getMonth()+1 : null,
-      _oy: od&&!isNaN(od) ? od.getFullYear() : null,
-      _ok:!isNaN(d)
-    };
+    const _ym = {};
+    for (const k in dateCols) {
+      const d = parseDate(r[dateCols[k]]);
+      _ym[k] = d ? `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}` : null;
+    }
+    return {...r, _ym, _ok:Object.values(_ym).some(Boolean)};
   }).filter(r=>r._ok);
 
   const allData = rows;
   if (!allData.length) throw new Error('데이터가 없습니다.');
 
-  const minY = Math.min(...allData.map(r=>r._ry));
-  const maxY = Math.max(...allData.map(r=>r._ry));
+  // 기본 날짜 기준: 최초등록일 → 접수일 → 개통일 순으로 데이터가 있는 것
+  dateMode = DATE_MODES.map(m=>m.key).find(k=>dateCols[k]);
+  const yrs = allData.map(r=>r._ym[dateMode]).filter(Boolean).map(v=>+v.slice(0,4));
+  const minY = Math.min(...yrs), maxY = Math.max(...yrs);
   const periodLabel = minY===maxY ? `${minY}년` : `${minY}~${maxY}년`;
 
   allData.forEach(r => {
@@ -469,7 +514,12 @@ function initDB(raw, filename) {
     r._partner=getPartner(r); r._agent=getAgent(r);
   });
 
-  G = {allData, minY, maxY, filename};
+  G = {allData, filename, dateCols};
+  document.getElementById('dm-btns').innerHTML = DATE_MODES.map(m => {
+    const has = !!dateCols[m.key];
+    const cnt = has ? allData.filter(r=>r._ym[m.key]).length : 0;
+    return `<button class="dt-btn${m.key===dateMode?' on':''}"${has?` onclick="setDateMode('${m.key}',this)" title="'${dateCols[m.key]}' 컬럼 기준 · ${cnt.toLocaleString()}건"`:` disabled style="opacity:.35;cursor:not-allowed" title="CSV에 ${m.label} 컬럼이 없습니다"`}>${m.label}</button>`;
+  }).join('');
   document.getElementById('tb-title').textContent = `${periodLabel} VOC 분석`;
   document.getElementById('tb-meta').textContent = `${filename} · ${allData.length.toLocaleString()}건`;
 
@@ -497,16 +547,11 @@ function getMD() {
     : carrierFilter==='기타' ? allData.filter(r=>!['KT','LG U+','SKT','SKYLIFE','SKB'].includes((r['통신사']||'').trim()))
     : allData.filter(r=>(r['통신사']||'').trim()===carrierFilter);
 
-  if (dateMode==='reg') {
-    const ym = r => `${r._ry}-${String(r._rm).padStart(2,'0')}`;
-    const months = [...new Set(filtered.map(ym))].sort();
-    return { months, getM:r=>ym(r), lbl:m=>{const[y,mo]=m.split('-');return`${y.slice(2)}-${mo}월`;}, data:filtered };
-  } else {
-    const data = filtered.filter(r=>r._om!==null);
-    const ym = r => `${r._oy}-${String(r._om).padStart(2,'0')}`;
-    const months = [...new Set(data.map(ym))].sort();
-    return { months, getM:r=>ym(r), lbl:m=>{const[y,mo]=m.split('-');return`${y.slice(2)}-${mo}월`;}, data };
-  }
+  // 선택한 날짜 기준 값이 없는 행은 제외
+  const data = filtered.filter(r=>r._ym[dateMode]);
+  const ym = r => r._ym[dateMode];
+  const months = [...new Set(data.map(ym))].sort();
+  return { months, getM:ym, lbl:m=>{const[y,mo]=m.split('-');return`${y.slice(2)}-${mo}월`;}, data };
 }
 
 function renderAll() {
@@ -537,16 +582,18 @@ function setCarrier(carrier, btn) {
 // ══════════════════════════════════════════
 function buildMetrics() {
   const {data} = getMD();
-  const total=data.length;
+  const total=data.length||1;
+  const cnt=data.length;
   const rv=data.filter(r=>r._isRvoc).length;
   const regRv=data.filter(r=>(r['구분']||'').includes('R-VOC')).length;
   const pSet=new Set(data.filter(r=>r._partner).map(r=>r._partner));
   const aSet=new Set(data.filter(r=>r._agent).map(r=>r._agent));
-  const {minY,maxY} = G;
+  const yrs = data.map(r=>+r._ym[dateMode].slice(0,4));
+  const minY = yrs.length?Math.min(...yrs):'-', maxY = yrs.length?Math.max(...yrs):'-';
   const periodLabel = minY===maxY?`${minY}년`:`${minY}~${maxY}년`;
   const carrierLabel = carrierFilter==='전체'?'전체 통신사':carrierFilter;
   document.getElementById('metrics').innerHTML=`
-    <div class="mc"><div class="mc-lbl">전체 인입</div><div class="mc-val">${total.toLocaleString()}</div><div class="mc-sub">${periodLabel} · ${dateMode==='reg'?'등록일':'개통일'} · ${carrierLabel}</div></div>
+    <div class="mc"><div class="mc-lbl">전체 인입</div><div class="mc-val">${cnt.toLocaleString()}</div><div class="mc-sub">${periodLabel} · ${modeLabel(dateMode)} 기준 · ${carrierLabel}</div></div>
     <div class="mc"><div class="mc-lbl">R-VOC 등록</div><div class="mc-val c-r">${regRv}</div><div class="mc-sub">${(regRv/total*100).toFixed(1)}%</div></div>
     <div class="mc"><div class="mc-lbl">R-VOC급 패턴</div><div class="mc-val c-o">${rv}</div><div class="mc-sub">${(rv/total*100).toFixed(1)}%</div></div>
     <div class="mc"><div class="mc-lbl">협력점 수</div><div class="mc-val c-b">${pSet.size}</div><div class="mc-sub">통합 후 기준</div></div>
@@ -653,7 +700,7 @@ function renderDrawer(patName, idx) {
 
   const items=slice.map(r=>{
     const txt=r['기타'].replace(/\n/g,' ').trim();
-    const m=dateMode==='reg'?r._rm:r._om;
+    const m=+r._ym[dateMode].slice(5,7);
     const carrier=(r['통신사']||'').trim()||'—';
     const gubun=(r['구분']||'').replace('발생','').trim()||'—';
     const partner=r._partner||r._agent||'—';
@@ -1028,6 +1075,378 @@ function sw(id){
   document.querySelectorAll('.tb').forEach((b,i)=>b.classList.toggle('on',TABS[i]===id));
   document.querySelectorAll('.pnl').forEach(p=>p.classList.toggle('on',p.id==='pnl-'+id));
 }
+</script>
+<script>
+// ══════════════════════════════════════════
+// 다우오피스 Works 자동 수집 북마크 (북마크바에서 실행됨 — 이 페이지에서는 실행 안 함)
+// 1) 화면이 보내는 목록 API 요청을 가로채 주소·페이지 파라미터를 알아냄
+// 2) 같은 요청을 페이지만 바꿔 반복 호출 → 전체 건 수집 (로그인 세션 그대로 사용)
+// 3) 대시보드 창으로 전송 (+ CSV 백업 다운로드)
+// ══════════════════════════════════════════
+function vocCollector(DASH) {
+  if (window.__vocRun) { alert('VOC 수집이 이미 실행 중입니다.'); return; }
+  window.__vocRun = true;
+  // 다우오피스 화면에서만 수집 가능 (로그인 세션 필요) → 다른 페이지면 VOC 화면을 열어줌
+  const DAOU_HOME = 'https://mj321.daouoffice.com/gw/app/works/applet/25039/home';
+  if (!/daouoffice\.com$/i.test(location.hostname)) {
+    window.__vocRun = false;
+    alert('이 북마크는 다우오피스 화면에서 눌러야 합니다.\n\n다우오피스 VOC 화면을 새 탭으로 열어드릴게요.\n그 탭에서 북마크를 한 번 더 눌러주세요.');
+    window.open(DAOU_HOME, '_blank');
+    return;
+  }
+
+  // 대시보드 창은 클릭 직후(사용자 동작 중)에 열어야 팝업 차단을 피함
+  let dashWin = null;
+  if (DASH) { try { dashWin = window.open(DASH + (DASH.includes('?') ? '&' : '?') + 'daou=' + Date.now() + '#from-daou', 'voc_dashboard'); } catch (e) {} }
+
+  // ── 상태창 ──
+  const box = document.createElement('div');
+  box.style.cssText = 'position:fixed;top:16px;right:16px;z-index:2147483647;width:340px;background:#fff;color:#18181b;border:1px solid rgba(0,0,0,.15);border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.18);font:13px/1.6 sans-serif;padding:14px 16px';
+  box.innerHTML = '<div style="font-weight:600;margin-bottom:6px">📥 VOC 자동 수집</div><div id="__vm" style="white-space:pre-wrap;color:#3f3f46"></div><div id="__vb" style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap"></div>';
+  document.body.appendChild(box);
+  const $m = box.querySelector('#__vm'), $b = box.querySelector('#__vb');
+  const say = t => { $m.textContent = t; };
+  const btn = (t, fn) => { const b = document.createElement('button'); b.textContent = t; b.style.cssText = 'font:12px sans-serif;padding:5px 10px;border:1px solid #d4d4d8;border-radius:6px;background:#fafafa;cursor:pointer'; b.onclick = fn; $b.appendChild(b); return b; };
+  const close = () => { box.remove(); window.__vocRun = false; };
+  btn('닫기', close);
+
+  // ── 요청 가로채기 (본창 + 같은 도메인 iframe) ──
+  const caps = [];
+  const IGN = /badge|collect|keyword|celebration|google|notification|alarm|unread|count$|\/me$|employee$|display\?/i;
+  const wins = [window];
+  document.querySelectorAll('iframe').forEach(f => { try { if (f.contentWindow.document) wins.push(f.contentWindow); } catch (e) {} });
+  const absUrl = (u, w) => { try { return new URL(u, w.location.href).href; } catch (e) { return String(u); } };
+  const record = (w, method, url, body, headers, text) => {
+    if (!/\/api\/|graphql/i.test(url) || IGN.test(url.split('?')[0])) return;
+    let json; try { json = JSON.parse(text); } catch (e) { return; }
+    caps.push({ w, method: (method || 'GET').toUpperCase(), url: absUrl(url, w), body: body == null ? null : String(body), headers: headers || {}, json });
+  };
+  const F0 = window.fetch.bind(window); // 수집용 원본 fetch (가로채기 전)
+  const restores = [];
+  wins.forEach(w => {
+    const X = w.XMLHttpRequest.prototype, oOpen = X.open, oSend = X.send, oSet = X.setRequestHeader;
+    X.open = function (m, u) { this.__v = { m, u, h: {} }; return oOpen.apply(this, arguments); };
+    X.setRequestHeader = function (k, v) { if (this.__v) this.__v.h[k] = v; return oSet.apply(this, arguments); };
+    X.send = function (b) { const x = this, v = x.__v; if (v) x.addEventListener('load', () => { try { record(w, v.m, v.u, b, v.h, x.responseText); } catch (e) {} }); return oSend.apply(this, arguments); };
+    const oFetch = w.fetch;
+    w.fetch = async function (i, o) {
+      const r = await oFetch.apply(this, arguments);
+      try {
+        const u = typeof i === 'string' ? i : (i && i.url) || String(i);
+        const h = {}; const hh = (o && o.headers) || (i && i.headers);
+        if (hh) { if (hh.forEach) hh.forEach((v, k) => { h[k] = v; }); else Object.assign(h, hh); }
+        r.clone().text().then(t => record(w, (o && o.method) || (i && i.method), u, o && o.body, h, t)).catch(() => {});
+      } catch (e) {}
+      return r;
+    };
+    restores.push(() => { X.open = oOpen; X.send = oSend; X.setRequestHeader = oSet; w.fetch = oFetch; });
+  });
+  const unhook = () => restores.forEach(f => f());
+
+  // ── JSON 분석 유틸 ──
+  const isObj = v => v && typeof v === 'object' && !Array.isArray(v);
+  // 가장 큰 "객체 배열" 찾기 = 목록 데이터
+  function findList(j, path, depth) {
+    path = path || []; depth = depth || 0;
+    let best = null;
+    if (Array.isArray(j)) {
+      if (j.length && j.every(isObj)) best = { path, arr: j };
+    } else if (isObj(j) && depth < 5) {
+      for (const k in j) {
+        const r = findList(j[k], path.concat(k), depth + 1);
+        if (r && (!best || r.arr.length > best.arr.length)) best = r;
+      }
+    }
+    return best;
+  }
+  const getAt = (j, p) => p.reduce((a, k) => (a == null ? a : a[k]), j);
+  function findTotal(j, depth) {
+    depth = depth || 0;
+    if (!isObj(j) || depth > 4) return null;
+    for (const k in j) if (/^(total|totalCount|totalElements|total_count|totalSize|totalRecords|recordsTotal)$/i.test(k) && typeof j[k] === 'number') return j[k];
+    for (const k in j) { const t = findTotal(j[k], depth + 1); if (t != null) return t; }
+    return null;
+  }
+  // 요청 파라미터(쿼리 + JSON body 숫자값) 평탄화
+  function params(c) {
+    const out = {};
+    try { new URL(c.url).searchParams.forEach((v, k) => { if (/^-?\d+$/.test(v)) out['q:' + k] = +v; }); } catch (e) {}
+    if (c.body) {
+      let b = null; try { b = JSON.parse(c.body); } catch (e) {}
+      if (b) { (function walk(o, p) { for (const k in o) { const v = o[k]; if (typeof v === 'number') out['b:' + p + k] = v; else if (typeof v === 'string' && /^\d+$/.test(v)) out['b:' + p + k] = +v; else if (isObj(v)) walk(v, p + k + '.'); } })(b, ''); }
+      else { try { new URLSearchParams(c.body).forEach((v, k) => { if (/^-?\d+$/.test(v)) out['f:' + k] = +v; }); } catch (e) {} }
+    }
+    return out;
+  }
+  const leaf = k => k.split(/[:.]/).pop();
+  const PAGE_RE = /^(page|pageNo|pageNum|pageNumber|pageIndex|currentPage|curPage|p)$/i;
+  const START_RE = /^(start|startIndex|skip|from|first|offsetStart)$/i;
+  const SIZE_RE = /^(size|pageSize|limit|offset|rows|perPage|count|listSize|pageUnit|max|maxResults)$/i;
+
+  // 요청 1건을 파라미터만 바꿔 재실행
+  function setParam(c, key, val) {
+    const [kind, name] = [key[0], key.slice(2)];
+    let url = c.url, body = c.body;
+    if (kind === 'q') { const u = new URL(url); u.searchParams.set(name, String(val)); url = u.href; }
+    else if (kind === 'b') { const b = JSON.parse(body); const ks = name.split('.'); let o = b; ks.slice(0, -1).forEach(k => { o = o[k]; }); const last = ks[ks.length - 1]; o[last] = typeof o[last] === 'string' ? String(val) : val; body = JSON.stringify(b); }
+    else if (kind === 'f') { const f = new URLSearchParams(body); f.set(name, String(val)); body = f.toString(); }
+    return { ...c, url, body };
+  }
+  async function run(c) {
+    const h = { ...c.headers }; delete h['Content-Length']; delete h['content-length'];
+    const r = await F0(c.url, { method: c.method, headers: h, body: c.method === 'GET' || c.method === 'HEAD' ? undefined : c.body, credentials: 'include' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  }
+
+  // ── 레코드 → 표(컬럼명) 변환 ──
+  const SYS = { createdAt: '등록일', createDate: '등록일', createdDate: '등록일', regDate: '등록일', registDate: '등록일', createdTime: '등록일', createTime: '등록일', regDt: '등록일',
+    updatedAt: '수정일', updateDate: '수정일', updatedDate: '수정일', modifiedAt: '수정일', modifyDate: '수정일', updateTime: '수정일',
+    creator: '요청자', createdBy: '요청자', writer: '요청자', register: '요청자', updater: '수정자', updatedBy: '수정자', modifier: '수정자' };
+  const pad = n => String(n).padStart(2, '0');
+  const fmtD = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  function val(v) {
+    if (v == null) return '';
+    if (typeof v === 'number') return (v > 1e11 && v < 1e13) ? fmtD(new Date(v)) : String(v);
+    if (typeof v === 'string') return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v) && !isNaN(new Date(v)) ? fmtD(new Date(v)) : v;
+    if (typeof v === 'boolean') return v ? 'Y' : 'N';
+    if (Array.isArray(v)) return v.map(val).filter(Boolean).join(', ');
+    for (const k of ['displayValue', 'text', 'label', 'name', 'displayName', 'title', 'value', 'code']) if (v[k] != null && typeof v[k] !== 'object') return val(v[k]);
+    if (v.value != null) return val(v.value);
+    return JSON.stringify(v);
+  }
+  // 캡처된 응답 어디서든 "필드 정의"(id → 이름) 수집
+  const fieldMap = {};
+  const ID_KEYS = ['cid', 'fieldCid', 'fieldId', 'componentId', 'key', 'code', 'id', 'name'];
+  const LB_KEYS = ['label', 'title', 'fieldName', 'displayName', 'name', 'text'];
+  function harvestFields(j, depth) {
+    depth = depth || 0; if (depth > 8 || j == null || typeof j !== 'object') return;
+    if (Array.isArray(j)) { j.forEach(x => harvestFields(x, depth + 1)); return; }
+    const idk = ID_KEYS.find(k => j[k] != null && typeof j[k] !== 'object');
+    const lbk = LB_KEYS.find(k => k !== idk && typeof j[k] === 'string' && /[가-힣*]/.test(j[k]));
+    if (idk && lbk && (j.type || j.fieldType || j.componentType || j.properties || j.cid || j.fieldCid)) fieldMap[String(j[idk])] = j[lbk].trim();
+    for (const k in j) if (typeof j[k] === 'object') harvestFields(j[k], depth + 1);
+  }
+  const label = k => fieldMap[k] || SYS[k] || k;
+  function flat(rec) {
+    const out = {};
+    (function go(o, depth) {
+      for (const k in o) {
+        const v = o[k];
+        if (isObj(v) && depth < 2 && /^(values|fields|data|properties|item|doc|document|content|formData|fieldValues)$/i.test(k)) { go(v, depth + 1); continue; }
+        if (Array.isArray(v) && v.length && v.every(isObj) && v.some(e => ID_KEYS.some(x => e[x] != null) && ('value' in e || 'values' in e || 'text' in e))) {
+          v.forEach(e => { const id = ID_KEYS.map(x => e[x]).find(x => x != null); const lb = fieldMap[id] || e.label || e.fieldName || e.title || label(String(id)); out[lb] = val('value' in e ? e.value : ('values' in e ? e.values : e.text)); });
+          continue;
+        }
+        const name = label(k);
+        if (name === 'id' || name === 'docId' || name === 'documentId') { out['*ID'] = val(v); continue; }
+        if (/^(appletId|privateFlag|actions|__go_checksum__)$/.test(k)) continue;
+        if (out[name] == null || out[name] === '') out[name] = val(v);
+      }
+    })(rec, 0);
+    return out;
+  }
+  const recId = r => { for (const k of ['id', 'docId', 'documentId', 'seq', '_id', 'no']) if (r[k] != null && typeof r[k] !== 'object') return String(r[k]); return JSON.stringify(r); };
+
+  // ── 진단 정보 (값은 가림, 구조만) ──
+  let diag = {};
+  const shape = (o, d) => { d = d || 0; if (Array.isArray(o)) return o.length ? [shape(o[0], d + 1), '…x' + o.length] : []; if (isObj(o)) { if (d > 4) return '{…}'; const s = {}; Object.keys(o).slice(0, 40).forEach(k => { s[k] = shape(o[k], d + 1); }); return s; } return typeof o; };
+  function diagText() {
+    return JSON.stringify({ page: location.href, caps: caps.slice(-8).map(c => ({ m: c.method, url: c.url.replace(/([?&][^=]*(name|phone|tel|keyword|q)=)[^&]*/gi, '$1***'), body: c.body ? c.body.slice(0, 400) : null, list: (findList(c.json) || {}).path, len: ((findList(c.json) || {}).arr || []).length, shape: shape(c.json) })), fieldMapKeys: Object.keys(fieldMap).length, ...diag }, null, 1);
+  }
+  const diagBtn = () => btn('진단정보 복사', async () => {
+    const t = diagText();
+    try { await navigator.clipboard.writeText(t); alert('복사됐습니다. 담당자(Claude)에게 붙여넣어 주세요.'); }
+    catch (e) { const ta = document.createElement('textarea'); ta.value = t; ta.style.cssText = 'width:100%;height:120px;font-size:10px;margin-top:6px'; box.appendChild(ta); ta.select(); }
+  });
+
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const listCaps = () => caps.map(c => ({ c, L: findList(c.json) })).filter(x => x.L && x.L.arr.length >= 3 && Object.keys(x.L.arr[0]).length >= 3);
+
+  (async () => {
+    try {
+      // ① 앱 ID로 목록 API 직접 찾기 (다우오피스: /gw/api/works/applets/{id}/..., page·offset 파라미터)
+      say('목록 API를 찾는 중…');
+      const appletId = (location.href.match(/applets?\/(\d+)/) || [])[1] || '25039'; // 다우오피스 다른 화면에서 눌러도 VOC 앱으로 조회
+      const probeLog = [];
+      let base = null, listPath, firstLen, pageKey = null, mode = 'page', sizeKey = null, P = {};
+      const tryJ = async (method, url, body) => {
+        try {
+          const r = await F0(url, { method, credentials: 'include', headers: body ? { 'Content-Type': 'application/json', Accept: 'application/json' } : { Accept: 'application/json' }, body });
+          probeLog.push(method + ' ' + url.replace(location.origin, '') + ' → ' + r.status);
+          if (!r.ok) return null;
+          return JSON.parse(await r.text());
+        } catch (e) { probeLog.push(method + ' ' + url.replace(location.origin, '') + ' → ERR'); return null; }
+      };
+      if (appletId) {
+        // GET 조회만 사용 (등록·수정 요청은 절대 보내지 않음). POST는 search 전용 주소만
+        const tries = [['GET', '/docs?page=0&offset=20'], ['GET', '/docs?page=0&offset=20&mainForm=true'], ['GET', '/docs/search?page=0&offset=20'],
+          ['GET', '/docs/list?page=0&offset=20'], ['GET', '/doc?page=0&offset=20'], ['POST', '/docs/search?page=0&offset=20', '{}']];
+        outer: for (const pre of ['/gw/api/works/applets/' + appletId, '/api/works/applets/' + appletId]) {
+          for (const [m, pth, body] of tries) {
+            const j = await tryJ(m, location.origin + pre + pth, body);
+            const Lr = j && findList(j);
+            if (Lr && Lr.arr.length && Object.keys(Lr.arr[0]).length >= 3) {
+              base = { c: { method: m, url: location.origin + pre + pth, body: body || null, headers: body ? { 'Content-Type': 'application/json' } : {}, json: j }, L: Lr };
+              pageKey = 'q:page'; sizeKey = 'q:offset'; mode = 'page';
+              break outer;
+            }
+          }
+        }
+      }
+      // ② 못 찾으면: 화면이 보내는 목록 요청을 가로채기
+      if (!base) {
+        const isList = x => (!appletId || x.c.url.includes('/applets/' + appletId)) && !/\/(logs|activity|consumers|filters|favorites|accessible|comments?)\b/i.test(x.c.url);
+        say('👉 VOC 목록 화면으로 가서\n목록 아래 [2페이지] → [1페이지]를 눌러 주세요. (최대 90초 대기)');
+        for (let i = 0; i < 180 && listCaps().filter(isList).length < 2; i++) await sleep(500);
+        const L = listCaps().filter(isList);
+        if (!L.length) { diag = { appletId, probeLog }; say('목록 요청을 찾지 못했습니다.'); diagBtn(); unhook(); return; }
+        const key = x => x.c.method + ' ' + x.c.url.split('?')[0];
+        const groups = {}; L.forEach(x => { (groups[key(x)] = groups[key(x)] || []).push(x); });
+        const g = Object.values(groups).sort((a, b) => b.length - a.length || b[0].L.arr.length - a[0].L.arr.length)[0];
+        base = g[g.length - 1];
+        if (g.length >= 2) {
+          const p1 = params(g[0].c), p2 = params(base.c);
+          const diffs = Object.keys(p2).filter(k => p1[k] != null && p1[k] !== p2[k] && !/time|ts|_$|nonce|rand/i.test(leaf(k)));
+          if (diffs.length) { pageKey = diffs.find(k => PAGE_RE.test(leaf(k))) || diffs.find(k => START_RE.test(leaf(k))) || diffs[0]; if (Math.abs(p2[pageKey] - p1[pageKey]) > 1) mode = 'start'; }
+        }
+        const Pp = params(base.c);
+        if (!pageKey) { pageKey = Object.keys(Pp).find(k => PAGE_RE.test(leaf(k))) || null; if (!pageKey) { pageKey = Object.keys(Pp).find(k => START_RE.test(leaf(k))) || null; if (pageKey) mode = 'start'; } }
+        if (!pageKey) { const o = Object.keys(Pp).find(k => /^offset$/i.test(leaf(k))); const l = Object.keys(Pp).find(k => /^limit$/i.test(leaf(k))); if (o && l) { pageKey = o; sizeKey = l; mode = 'start'; } }
+        sizeKey = sizeKey || Object.keys(Pp).find(k => k !== pageKey && SIZE_RE.test(leaf(k)) && Pp[k] === base.L.arr.length) || Object.keys(Pp).find(k => k !== pageKey && SIZE_RE.test(leaf(k)));
+      }
+      P = params(base.c); listPath = base.L.path; firstLen = base.L.arr.length;
+      diag = { appletId, probeLog, api: base.c.method + ' ' + base.c.url.split('?')[0], listPath, firstLen, pageKey, sizeKey, mode, recordShape: shape(base.L.arr[0]) };
+
+      // 필드 정의(컬럼 이름) — 화면 첫 로딩 때 이미 받아갔을 수 있어 추정 주소로 다시 요청
+      say('컬럼 정보를 찾는 중…');
+      const u0 = new URL(base.c.url); const segs = u0.pathname.split('/').filter(Boolean);
+      const probes = new Set();
+      for (let cut = 1; cut <= 2 && segs.length - cut >= 2; cut++) {
+        const pre = '/' + segs.slice(0, segs.length - cut).join('/');
+        probes.add(pre);
+        ['fields', 'components', 'form', 'forms', 'mainform', 'layout', 'layouts', 'columns', 'listview', 'views', 'meta', 'schema', 'setting', 'settings', 'info'].forEach(x => probes.add(pre + '/' + x));
+      }
+      for (const pth of probes) {
+        try { const r = await F0(u0.origin + pth, { credentials: 'include', headers: { Accept: 'application/json' } }); if (r.ok) { const t = await r.text(); try { harvestFields(JSON.parse(t)); } catch (e) {} } } catch (e) {}
+      }
+      caps.forEach(c => harvestFields(c.json));
+      diag.fieldMap = Object.keys(fieldMap).length; diag.fieldLabels = [...new Set(Object.values(fieldMap))].slice(0, 60);
+      if (!pageKey) { say('페이지 파라미터를 찾지 못했습니다.'); diagBtn(); unhook(); return; }
+
+      // 한 번에 더 많이 받기 시도 (200건)
+      let size = sizeKey ? P[sizeKey] : firstLen, tpl = base.c;
+      if (sizeKey) {
+        try { const t = setParam(tpl, sizeKey, 200); const j = await run(mode === 'start' ? setParam(t, pageKey, 0) : t); const a = getAt(j, listPath); if (Array.isArray(a) && a.length > size) { tpl = t; size = a.length; } } catch (e) {}
+      }
+      const total = findTotal(base.c.json);
+      const seen = new Map();
+      // 0페이지부터 시도 — 0이 1과 같으면 중복제거로 자연스럽게 처리
+      let pg = mode === 'start' ? 0 : 0, emptyRuns = 0, errRuns = 0;
+      for (let n = 0; n < 3000; n++) {
+        say(`수집 중… ${seen.size.toLocaleString()}${total ? ' / ' + total.toLocaleString() : ''}건`);
+        let arr;
+        try { const j = await run(setParam(tpl, pageKey, mode === 'start' ? pg * size : pg)); arr = getAt(j, listPath); errRuns = 0; }
+        catch (e) { if (pg === 0 && mode === 'page') { pg = 1; continue; } if (++errRuns >= 3) throw e; await sleep(1000); continue; }
+        if (!Array.isArray(arr) || !arr.length) { if (pg === 0 && mode === 'page') { pg = 1; continue; } break; }
+        let added = 0; arr.forEach(r => { const id = recId(r); if (!seen.has(id)) { seen.set(id, r); added++; } });
+        if (!added && pg > 1) { if (++emptyRuns >= 2) break; } else emptyRuns = 0;
+        if (total && total > firstLen && seen.size >= total) break;
+        if (arr.length < size && pg > 0) break;
+        pg++;
+        await sleep(120);
+      }
+      unhook();
+      // ③ 목록 API에 빠진 필드(긴 텍스트 '기타' 등) → 문서별 상세 조회로 채우기
+      const recs = [...seen.values()];
+      const present = new Set(); recs.forEach(r => { if (isObj(r.values)) Object.keys(r.values).forEach(k => present.add(k)); });
+      const missing = Object.keys(fieldMap).filter(k => /^_/.test(k) && !present.has(k));
+      diag.missingFields = missing.map(k => fieldMap[k]);
+      if (missing.length && recs[0] && isObj(recs[0].values) && recs[0].id != null) {
+        const detUrl = id => base.c.url.split('?')[0].replace(/\/+$/, '') + '/' + encodeURIComponent(id);
+        const valuesOf = j => { const d = j && (isObj(j.data) ? j.data : j); return d && isObj(d.values) ? d.values : null; };
+        let probe = null;
+        for (const r of recs.slice(0, 3)) { const v = valuesOf(await tryJ('GET', detUrl(r.id))); if (v) probe = Object.assign(probe || {}, v); }
+        if (probe && missing.some(k => k in probe)) {
+          const need = missing.filter(k => k in probe).map(k => fieldMap[k]).join(', ');
+          let done = 0, fail = 0, i = 0; const t0 = Date.now();
+          const worker = async () => {
+            while (i < recs.length) {
+              const r = recs[i++];
+              let v = null;
+              for (let a = 0; a < 3 && !v; a++) {
+                try { const res = await F0(detUrl(r.id), { credentials: 'include', headers: { Accept: 'application/json' } }); if (res.ok) v = valuesOf(await res.json()); else if (res.status === 404) break; } catch (e) {}
+                if (!v) await sleep(800);
+              }
+              if (v) { for (const k in v) if (!(k in r.values)) r.values[k] = v[k]; } else fail++;
+              done++;
+              if (done % 25 === 0 || done === recs.length) {
+                const left = Math.round((Date.now() - t0) / done * (recs.length - done) / 1000);
+                say(`'${need}' 채우는 중… ${done.toLocaleString()} / ${recs.length.toLocaleString()}건\n(남은 시간 약 ${left >= 60 ? Math.floor(left / 60) + '분 ' : ''}${left % 60}초 · 창을 닫지 마세요)`);
+              }
+            }
+          };
+          await Promise.all(Array.from({ length: 6 }, worker));
+          diag.detailFetched = done - fail; diag.detailFailed = fail;
+        } else diag.detailProbe = probe ? Object.keys(probe).length + ' keys, missing not included' : 'no values';
+      }
+      const rows = recs.map(flat);
+      diag.collected = rows.length; diag.columns = rows.length ? Object.keys(rows[0]) : [];
+      if (!rows.length) { say('수집된 데이터가 없습니다.'); diagBtn(); return; }
+
+      const cols = [...new Set(rows.flatMap(r => Object.keys(r)))];
+      rows.forEach((r, i) => { const o = {}; cols.forEach(c => { o[c] = r[c] == null ? '' : r[c]; }); rows[i] = o; });
+      const need = ['기타', '등록일'].filter(c => !cols.includes(c));
+      const now = new Date(), fname = `VOC_자동수집_${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}.csv`;
+      const csvDl = () => {
+        const q = s => '"' + String(s == null ? '' : s).replace(/"/g, '""') + '"';
+        const csv = '﻿' + [cols.map(q).join(',')].concat(rows.map(r => cols.map(c => q(r[c])).join(','))).join('\r\n');
+        const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })); a.download = fname; a.style.display = "none"; document.body.appendChild(a); a.click(); setTimeout(() => { a.remove(); URL.revokeObjectURL(a.href); }, 4000);
+      };
+
+      let sent = false;
+      if (dashWin && !dashWin.closed) {
+        const origin = new URL(DASH).origin;
+        const send = () => { try { dashWin.postMessage({ type: 'voc-rows', rows, filename: fname }, origin); } catch (e) {} };
+        const onMsg = e => { if (e.source === dashWin && e.data && e.data.type === 'voc-ok') { sent = true; window.removeEventListener('message', onMsg); } };
+        window.addEventListener('message', onMsg);
+        for (let i = 0; i < 20 && !sent; i++) { send(); await sleep(500); }
+      }
+      say(`✅ ${rows.length.toLocaleString()}건 수집 완료` + (diag.detailFailed ? `\n(상세 조회 실패 ${diag.detailFailed}건 — 해당 건은 일부 칸이 비어 있음)` : '') + (sent ? '\n대시보드 창으로 보냈습니다.' : '\n아래 [CSV 저장] 후 대시보드에 끌어다 놓으세요.') + (need.length ? `\n⚠ '${need.join("', '")}' 컬럼을 못 찾았습니다 → [진단정보 복사]를 보내주세요.` : ''));
+      btn('CSV 저장', csvDl);
+      if (dashWin && sent) btn('대시보드 보기', () => dashWin.focus());
+      if (need.length) diagBtn();
+      if (!sent) csvDl();
+    } catch (e) {
+      unhook();
+      say('오류: ' + e.message);
+      diagBtn();
+    }
+  })();
+}
+
+// ── 북마크 링크 생성 + 수집 결과 받기 ──
+(function () {
+  const isHttp = /^https?:$/.test(location.protocol);
+  const DASH = isHttp ? location.href.split('#')[0] : '';
+  document.getElementById('bm-link').href = 'javascript:' + encodeURIComponent('(' + vocCollector.toString() + ')(' + JSON.stringify(DASH) + ')');
+  document.getElementById('bm-note').textContent = isHttp
+    ? '수집이 끝나면 이 대시보드가 새 창으로 자동으로 열립니다. 로그인한 본인 계정 권한으로만 조회되며, 데이터는 이 PC 브라우저 안에서만 오갑니다.'
+    : '※ 지금 대시보드를 파일로 열어서, 수집 결과는 CSV로 저장됩니다 → 저장된 파일을 위에 끌어다 놓으세요.';
+  const recv = document.getElementById('recv');
+  if (location.hash === '#from-daou') recv.style.display = 'flex';
+  window.addEventListener('message', e => {
+    if (!/^https:\/\/[a-z0-9-]+\.daouoffice\.com$/i.test(e.origin)) return;
+    const d = e.data;
+    if (!d || d.type !== 'voc-rows' || !Array.isArray(d.rows)) return;
+    try { e.source.postMessage({ type: 'voc-ok' }, e.origin); } catch (x) {}
+    if (window.__vocGot) return; window.__vocGot = true;
+    recv.style.display = 'none';
+    history.replaceState(null, '', location.pathname + location.search.replace(/[?&]daou=\d+/, ''));
+    hideErr();
+    try { initDB(d.rows, d.filename || '다우오피스 자동수집'); } catch (x) { showErr(x.message); }
+  });
+})();
 </script>
 </body>
 </html>
