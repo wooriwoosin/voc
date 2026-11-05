@@ -1233,6 +1233,7 @@ function vocCollector(DASH) {
         }
         const name = label(k);
         if (name === 'id' || name === 'docId' || name === 'documentId') { out['*ID'] = val(v); continue; }
+        if (/^(appletId|privateFlag|actions|__go_checksum__)$/.test(k)) continue;
         if (out[name] == null || out[name] === '') out[name] = val(v);
       }
     })(rec, 0);
@@ -1349,7 +1350,40 @@ function vocCollector(DASH) {
         await sleep(120);
       }
       unhook();
-      const rows = [...seen.values()].map(flat);
+      // ③ 목록 API에 빠진 필드(긴 텍스트 '기타' 등) → 문서별 상세 조회로 채우기
+      const recs = [...seen.values()];
+      const present = new Set(); recs.forEach(r => { if (isObj(r.values)) Object.keys(r.values).forEach(k => present.add(k)); });
+      const missing = Object.keys(fieldMap).filter(k => /^_/.test(k) && !present.has(k));
+      diag.missingFields = missing.map(k => fieldMap[k]);
+      if (missing.length && recs[0] && isObj(recs[0].values) && recs[0].id != null) {
+        const detUrl = id => base.c.url.split('?')[0].replace(/\/+$/, '') + '/' + encodeURIComponent(id);
+        const valuesOf = j => { const d = j && (isObj(j.data) ? j.data : j); return d && isObj(d.values) ? d.values : null; };
+        let probe = null;
+        for (const r of recs.slice(0, 3)) { const v = valuesOf(await tryJ('GET', detUrl(r.id))); if (v) probe = Object.assign(probe || {}, v); }
+        if (probe && missing.some(k => k in probe)) {
+          const need = missing.filter(k => k in probe).map(k => fieldMap[k]).join(', ');
+          let done = 0, fail = 0, i = 0; const t0 = Date.now();
+          const worker = async () => {
+            while (i < recs.length) {
+              const r = recs[i++];
+              let v = null;
+              for (let a = 0; a < 3 && !v; a++) {
+                try { const res = await F0(detUrl(r.id), { credentials: 'include', headers: { Accept: 'application/json' } }); if (res.ok) v = valuesOf(await res.json()); else if (res.status === 404) break; } catch (e) {}
+                if (!v) await sleep(800);
+              }
+              if (v) { for (const k in v) if (!(k in r.values)) r.values[k] = v[k]; } else fail++;
+              done++;
+              if (done % 25 === 0 || done === recs.length) {
+                const left = Math.round((Date.now() - t0) / done * (recs.length - done) / 1000);
+                say(`'${need}' 채우는 중… ${done.toLocaleString()} / ${recs.length.toLocaleString()}건\n(남은 시간 약 ${left >= 60 ? Math.floor(left / 60) + '분 ' : ''}${left % 60}초 · 창을 닫지 마세요)`);
+              }
+            }
+          };
+          await Promise.all(Array.from({ length: 6 }, worker));
+          diag.detailFetched = done - fail; diag.detailFailed = fail;
+        } else diag.detailProbe = probe ? Object.keys(probe).length + ' keys, missing not included' : 'no values';
+      }
+      const rows = recs.map(flat);
       diag.collected = rows.length; diag.columns = rows.length ? Object.keys(rows[0]) : [];
       if (!rows.length) { say('수집된 데이터가 없습니다.'); diagBtn(); return; }
 
@@ -1371,7 +1405,7 @@ function vocCollector(DASH) {
         window.addEventListener('message', onMsg);
         for (let i = 0; i < 20 && !sent; i++) { send(); await sleep(500); }
       }
-      say(`✅ ${rows.length.toLocaleString()}건 수집 완료` + (sent ? '\n대시보드 창으로 보냈습니다.' : '\n아래 [CSV 저장] 후 대시보드에 끌어다 놓으세요.') + (need.length ? `\n⚠ '${need.join("', '")}' 컬럼을 못 찾았습니다 → [진단정보 복사]를 보내주세요.` : ''));
+      say(`✅ ${rows.length.toLocaleString()}건 수집 완료` + (diag.detailFailed ? `\n(상세 조회 실패 ${diag.detailFailed}건 — 해당 건은 일부 칸이 비어 있음)` : '') + (sent ? '\n대시보드 창으로 보냈습니다.' : '\n아래 [CSV 저장] 후 대시보드에 끌어다 놓으세요.') + (need.length ? `\n⚠ '${need.join("', '")}' 컬럼을 못 찾았습니다 → [진단정보 복사]를 보내주세요.` : ''));
       btn('CSV 저장', csvDl);
       if (dashWin && sent) btn('대시보드 보기', () => dashWin.focus());
       if (need.length) diagBtn();
