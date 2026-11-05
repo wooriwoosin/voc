@@ -44,6 +44,8 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--t1);
 .daou li{padding:2px 0}
 .bm-link{display:inline-block;margin:6px 0 2px;padding:6px 14px;background:var(--blu);color:#fff;border-radius:8px;text-decoration:none;font-weight:600;font-size:12px;cursor:grab}
 .daou-note{font-size:11px;color:var(--t3);margin-top:6px}
+.recv-bar{width:320px;max-width:80vw;height:6px;background:var(--bd2);border-radius:3px;overflow:hidden}
+#recv-fill{height:100%;width:0;background:var(--blu);transition:width .3s}
 #recv{display:none;position:fixed;inset:0;background:rgba(240,237,232,.92);z-index:500;align-items:center;justify-content:center;flex-direction:column;gap:8px;font-size:15px}
 .err{display:none;margin-top:1rem;max-width:500px;width:100%;padding:10px 14px;background:var(--red-s);border:1px solid var(--red-m);border-radius:var(--r);font-size:12px;color:var(--red)}
 
@@ -197,7 +199,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--t1);
   </div>
   <div class="err" id="err"></div>
 </div>
-<div id="recv"><div>📥 다우오피스에서 수집 중…</div><div style="font-size:12px;color:var(--t2)">다우오피스 창 오른쪽 위 진행 상황을 확인하세요. 끝나면 자동으로 열립니다.</div></div>
+<div id="recv"><div>📥 다우오피스에서 수집 중…</div><div id="recv-msg" style="font-size:14px;font-weight:500;white-space:pre-wrap;text-align:center;min-height:2.6em">다우오피스 창에서 준비 중…</div><div class="recv-bar"><div id="recv-fill"></div></div><div style="font-size:12px;color:var(--t2)">끝나면 자동으로 분석 화면이 열립니다. 다우오피스 창은 닫지 마세요.</div></div>
 
 <!-- 대시보드 -->
 <div id="db">
@@ -1105,7 +1107,11 @@ function vocCollector(DASH) {
   box.innerHTML = '<div style="font-weight:600;margin-bottom:6px">📥 VOC 자동 수집</div><div id="__vm" style="white-space:pre-wrap;color:#3f3f46"></div><div id="__vb" style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap"></div>';
   document.body.appendChild(box);
   const $m = box.querySelector('#__vm'), $b = box.querySelector('#__vb');
-  const say = t => { $m.textContent = t; };
+  // 진행 상황을 다우오피스 상태창 + 대시보드 창 양쪽에 표시
+  const say = t => {
+    $m.textContent = t;
+    if (dashWin && !dashWin.closed) { try { dashWin.postMessage({ type: 'voc-progress', text: t }, new URL(DASH).origin); } catch (e) {} }
+  };
   const btn = (t, fn) => { const b = document.createElement('button'); b.textContent = t; b.style.cssText = 'font:12px sans-serif;padding:5px 10px;border:1px solid #d4d4d8;border-radius:6px;background:#fafafa;cursor:pointer'; b.onclick = fn; $b.appendChild(b); return b; };
   const close = () => { box.remove(); window.__vocRun = false; };
   btn('닫기', close);
@@ -1438,6 +1444,15 @@ function vocCollector(DASH) {
   window.addEventListener('message', e => {
     if (!/^https:\/\/[a-z0-9-]+\.daouoffice\.com$/i.test(e.origin)) return;
     const d = e.data;
+    if (d && d.type === 'voc-progress' && typeof d.text === 'string') {
+      if (window.__vocGot) return;
+      recv.style.display = 'flex';
+      document.getElementById('recv-msg').textContent = d.text;
+      // "1,250 / 10,962건" 형태면 진행 막대 표시 (목록 수집 0~40%, 기타 채우기 40~100%)
+      const m = d.text.replace(/,/g, '').match(/(\d+)\s*\/\s*(\d+)\s*건/);
+      if (m) { const r = Math.min(1, +m[1] / +m[2]); document.getElementById('recv-fill').style.width = ((/채우는/.test(d.text) ? 40 + r * 60 : r * 40)).toFixed(1) + '%'; }
+      return;
+    }
     if (!d || d.type !== 'voc-rows' || !Array.isArray(d.rows)) return;
     try { e.source.postMessage({ type: 'voc-ok' }, e.origin); } catch (x) {}
     if (window.__vocGot) return; window.__vocGot = true;
