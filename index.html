@@ -1252,55 +1252,63 @@ function vocCollector(DASH) {
     catch (e) { const ta = document.createElement('textarea'); ta.value = t; ta.style.cssText = 'width:100%;height:120px;font-size:10px;margin-top:6px'; box.appendChild(ta); ta.select(); }
   });
 
-  // ── 목록 다시 불러오게 만들기: 페이지 버튼 자동 클릭 ──
-  function clickPager() {
-    for (const w of wins) {
-      const d = w.document;
-      const cands = [...d.querySelectorAll('a,button,li,span')].filter(e => e.offsetParent && /^\s*2\s*$/.test(e.textContent) && e.closest('[class*="pag" i],[class*="Pag"],nav,.paging,.page'));
-      if (cands.length) { cands[0].click(); return true; }
-    }
-    return false;
-  }
-  function clickPager1() {
-    for (const w of wins) {
-      const d = w.document;
-      const c = [...d.querySelectorAll('a,button,li,span')].find(e => e.offsetParent && /^\s*1\s*$/.test(e.textContent) && e.closest('[class*="pag" i],[class*="Pag"],nav,.paging,.page'));
-      if (c) { c.click(); return true; }
-    }
-    return false;
-  }
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const listCaps = () => caps.map(c => ({ c, L: findList(c.json) })).filter(x => x.L && x.L.arr.length >= 3 && Object.keys(x.L.arr[0]).length >= 3);
 
   (async () => {
     try {
-      say('목록 요청을 찾는 중…');
-      clickPager(); await sleep(2500); clickPager1();
-      for (let i = 0; i < 40 && listCaps().length < 2; i++) {
-        if (i === 4) say('자동으로 못 찾았습니다.\n👉 화면의 VOC 목록에서 [2페이지] → [1페이지]를 눌러 주세요.');
-        await sleep(500);
+      // ① 앱 ID로 목록 API 직접 찾기 (다우오피스: /gw/api/works/applets/{id}/..., page·offset 파라미터)
+      say('목록 API를 찾는 중…');
+      const appletId = (location.href.match(/applets?\/(\d+)/) || [])[1];
+      const probeLog = [];
+      let base = null, listPath, firstLen, pageKey = null, mode = 'page', sizeKey = null, P = {};
+      const tryJ = async (method, url, body) => {
+        try {
+          const r = await F0(url, { method, credentials: 'include', headers: body ? { 'Content-Type': 'application/json', Accept: 'application/json' } : { Accept: 'application/json' }, body });
+          probeLog.push(method + ' ' + url.replace(location.origin, '') + ' → ' + r.status);
+          if (!r.ok) return null;
+          return JSON.parse(await r.text());
+        } catch (e) { probeLog.push(method + ' ' + url.replace(location.origin, '') + ' → ERR'); return null; }
+      };
+      if (appletId) {
+        // GET 조회만 사용 (등록·수정 요청은 절대 보내지 않음). POST는 search 전용 주소만
+        const tries = [['GET', '/docs?page=0&offset=20'], ['GET', '/docs?page=0&offset=20&mainForm=true'], ['GET', '/docs/search?page=0&offset=20'],
+          ['GET', '/docs/list?page=0&offset=20'], ['GET', '/doc?page=0&offset=20'], ['POST', '/docs/search?page=0&offset=20', '{}']];
+        outer: for (const pre of ['/gw/api/works/applets/' + appletId, '/api/works/applets/' + appletId]) {
+          for (const [m, pth, body] of tries) {
+            const j = await tryJ(m, location.origin + pre + pth, body);
+            const Lr = j && findList(j);
+            if (Lr && Lr.arr.length && Object.keys(Lr.arr[0]).length >= 3) {
+              base = { c: { method: m, url: location.origin + pre + pth, body: body || null, headers: body ? { 'Content-Type': 'application/json' } : {}, json: j }, L: Lr };
+              pageKey = 'q:page'; sizeKey = 'q:offset'; mode = 'page';
+              break outer;
+            }
+          }
+        }
       }
-      const L = listCaps();
-      if (!L.length) { say('목록 요청을 찾지 못했습니다.\n(Works 목록 화면에서 실행했는지 확인해 주세요)'); diagBtn(); unhook(); return; }
-
-      // 가장 큰 목록을 주는 API 경로 선택
-      const key = x => x.c.method + ' ' + x.c.url.split('?')[0];
-      const groups = {}; L.forEach(x => { (groups[key(x)] = groups[key(x)] || []).push(x); });
-      const g = Object.values(groups).sort((a, b) => b.length - a.length || b[0].L.arr.length - a[0].L.arr.length)[0];
-      const base = g[g.length - 1], listPath = base.L.path, firstLen = base.L.arr.length;
-
-      // 페이지 파라미터 찾기: 두 요청 사이에 바뀐 숫자값 → 페이지
-      let pageKey = null, mode = 'page', sizeKey = null;
-      if (g.length >= 2) {
-        const p1 = params(g[0].c), p2 = params(base.c);
-        const diffs = Object.keys(p2).filter(k => p1[k] != null && p1[k] !== p2[k] && !/time|ts|_$|nonce|rand/i.test(leaf(k)));
-        if (diffs.length) { pageKey = diffs.find(k => PAGE_RE.test(leaf(k))) || diffs.find(k => START_RE.test(leaf(k))) || diffs[0]; if (Math.abs(p2[pageKey] - p1[pageKey]) > 1) mode = 'start'; }
+      // ② 못 찾으면: 화면이 보내는 목록 요청을 가로채기
+      if (!base) {
+        const isList = x => (!appletId || x.c.url.includes('/applets/' + appletId)) && !/\/(logs|activity|consumers|filters|favorites|accessible|comments?)\b/i.test(x.c.url);
+        say('👉 VOC 목록 화면으로 가서\n목록 아래 [2페이지] → [1페이지]를 눌러 주세요. (최대 90초 대기)');
+        for (let i = 0; i < 180 && listCaps().filter(isList).length < 2; i++) await sleep(500);
+        const L = listCaps().filter(isList);
+        if (!L.length) { diag = { appletId, probeLog }; say('목록 요청을 찾지 못했습니다.'); diagBtn(); unhook(); return; }
+        const key = x => x.c.method + ' ' + x.c.url.split('?')[0];
+        const groups = {}; L.forEach(x => { (groups[key(x)] = groups[key(x)] || []).push(x); });
+        const g = Object.values(groups).sort((a, b) => b.length - a.length || b[0].L.arr.length - a[0].L.arr.length)[0];
+        base = g[g.length - 1];
+        if (g.length >= 2) {
+          const p1 = params(g[0].c), p2 = params(base.c);
+          const diffs = Object.keys(p2).filter(k => p1[k] != null && p1[k] !== p2[k] && !/time|ts|_$|nonce|rand/i.test(leaf(k)));
+          if (diffs.length) { pageKey = diffs.find(k => PAGE_RE.test(leaf(k))) || diffs.find(k => START_RE.test(leaf(k))) || diffs[0]; if (Math.abs(p2[pageKey] - p1[pageKey]) > 1) mode = 'start'; }
+        }
+        const Pp = params(base.c);
+        if (!pageKey) { pageKey = Object.keys(Pp).find(k => PAGE_RE.test(leaf(k))) || null; if (!pageKey) { pageKey = Object.keys(Pp).find(k => START_RE.test(leaf(k))) || null; if (pageKey) mode = 'start'; } }
+        if (!pageKey) { const o = Object.keys(Pp).find(k => /^offset$/i.test(leaf(k))); const l = Object.keys(Pp).find(k => /^limit$/i.test(leaf(k))); if (o && l) { pageKey = o; sizeKey = l; mode = 'start'; } }
+        sizeKey = sizeKey || Object.keys(Pp).find(k => k !== pageKey && SIZE_RE.test(leaf(k)) && Pp[k] === base.L.arr.length) || Object.keys(Pp).find(k => k !== pageKey && SIZE_RE.test(leaf(k)));
       }
-      const P = params(base.c);
-      if (!pageKey) { pageKey = Object.keys(P).find(k => PAGE_RE.test(leaf(k))) || null; if (!pageKey) { pageKey = Object.keys(P).find(k => START_RE.test(leaf(k))) || null; if (pageKey) mode = 'start'; } }
-      if (!pageKey) { const o = Object.keys(P).find(k => /^offset$/i.test(leaf(k))); const l = Object.keys(P).find(k => /^limit$/i.test(leaf(k))); if (o && l) { pageKey = o; sizeKey = l; mode = 'start'; } }
-      sizeKey = sizeKey || Object.keys(P).find(k => k !== pageKey && SIZE_RE.test(leaf(k)) && P[k] === firstLen) || Object.keys(P).find(k => k !== pageKey && SIZE_RE.test(leaf(k)));
-      diag = { api: key(base), listPath, firstLen, pageKey, sizeKey, mode };
+      P = params(base.c); listPath = base.L.path; firstLen = base.L.arr.length;
+      diag = { appletId, probeLog, api: base.c.method + ' ' + base.c.url.split('?')[0], listPath, firstLen, pageKey, sizeKey, mode, recordShape: shape(base.L.arr[0]) };
 
       // 필드 정의(컬럼 이름) — 화면 첫 로딩 때 이미 받아갔을 수 있어 추정 주소로 다시 요청
       say('컬럼 정보를 찾는 중…');
@@ -1309,19 +1317,19 @@ function vocCollector(DASH) {
       for (let cut = 1; cut <= 2 && segs.length - cut >= 2; cut++) {
         const pre = '/' + segs.slice(0, segs.length - cut).join('/');
         probes.add(pre);
-        ['fields', 'components', 'form', 'forms', 'layout', 'layouts', 'columns', 'meta', 'schema', 'settings', 'info'].forEach(x => probes.add(pre + '/' + x));
+        ['fields', 'components', 'form', 'forms', 'mainform', 'layout', 'layouts', 'columns', 'listview', 'views', 'meta', 'schema', 'setting', 'settings', 'info'].forEach(x => probes.add(pre + '/' + x));
       }
       for (const pth of probes) {
         try { const r = await F0(u0.origin + pth, { credentials: 'include', headers: { Accept: 'application/json' } }); if (r.ok) { const t = await r.text(); try { harvestFields(JSON.parse(t)); } catch (e) {} } } catch (e) {}
       }
       caps.forEach(c => harvestFields(c.json));
-      diag.fieldMap = Object.keys(fieldMap).length;
+      diag.fieldMap = Object.keys(fieldMap).length; diag.fieldLabels = [...new Set(Object.values(fieldMap))].slice(0, 60);
       if (!pageKey) { say('페이지 파라미터를 찾지 못했습니다.'); diagBtn(); unhook(); return; }
 
       // 한 번에 더 많이 받기 시도 (200건)
       let size = sizeKey ? P[sizeKey] : firstLen, tpl = base.c;
       if (sizeKey) {
-        try { const t = setParam(tpl, sizeKey, 200); const j = await run(mode === 'start' ? setParam(t, pageKey, 0) : t); const a = getAt(j, listPath); if (Array.isArray(a) && a.length > size) { tpl = t; size = 200; } } catch (e) {}
+        try { const t = setParam(tpl, sizeKey, 200); const j = await run(mode === 'start' ? setParam(t, pageKey, 0) : t); const a = getAt(j, listPath); if (Array.isArray(a) && a.length > size) { tpl = t; size = a.length; } } catch (e) {}
       }
       const total = findTotal(base.c.json);
       const seen = new Map();
