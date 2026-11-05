@@ -1086,7 +1086,14 @@ function sw(id){
 function vocCollector(DASH) {
   if (window.__vocRun) { alert('VOC 수집이 이미 실행 중입니다.'); return; }
   window.__vocRun = true;
-  if (!/daouoffice/i.test(location.hostname) && !confirm('다우오피스 화면이 아닌 것 같습니다. 계속할까요?')) { window.__vocRun = false; return; }
+  // 다우오피스 화면에서만 수집 가능 (로그인 세션 필요) → 다른 페이지면 VOC 화면을 열어줌
+  const DAOU_HOME = 'https://mj321.daouoffice.com/gw/app/works/applet/25039/home';
+  if (!/daouoffice\.com$/i.test(location.hostname)) {
+    window.__vocRun = false;
+    alert('이 북마크는 다우오피스 화면에서 눌러야 합니다.\n\n다우오피스 VOC 화면을 새 탭으로 열어드릴게요.\n그 탭에서 북마크를 한 번 더 눌러주세요.');
+    window.open(DAOU_HOME, '_blank');
+    return;
+  }
 
   // 대시보드 창은 클릭 직후(사용자 동작 중)에 열어야 팝업 차단을 피함
   let dashWin = null;
@@ -1260,7 +1267,7 @@ function vocCollector(DASH) {
     try {
       // ① 앱 ID로 목록 API 직접 찾기 (다우오피스: /gw/api/works/applets/{id}/..., page·offset 파라미터)
       say('목록 API를 찾는 중…');
-      const appletId = (location.href.match(/applets?\/(\d+)/) || [])[1];
+      const appletId = (location.href.match(/applets?\/(\d+)/) || [])[1] || '25039'; // 다우오피스 다른 화면에서 눌러도 VOC 앱으로 조회
       const probeLog = [];
       let base = null, listPath, firstLen, pageKey = null, mode = 'page', sizeKey = null, P = {};
       const tryJ = async (method, url, body) => {
