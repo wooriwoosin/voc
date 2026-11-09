@@ -302,9 +302,12 @@ let MAPPING = [
 ];
 
 // 매핑 저장
-// - MAP_API(구글 시트 웹 앱) 가 있으면: 공유 저장소에서 불러오고 변경도 거기에 저장 → 모든 사람이 같은 매핑
+// - Supabase 주소·키가 있으면: 공유 저장소에서 불러오고 변경도 거기에 저장 → 모든 사람이 같은 매핑
+//   (테이블·함수는 supabase-setup.sql 로 생성. 키는 공개용 anon/publishable 키 — 쓰기는 DB 함수로만 허용)
 // - 이 브라우저(localStorage)에는 마지막 상태를 백업 (공유 저장소 접속 실패 시 사용)
-const MAP_API = '';
+const SUPABASE_URL = '';   // 예: https://abcdefgh.supabase.co
+const SUPABASE_KEY = '';   // Project Settings > API Keys 의 anon(또는 publishable) 키
+const MAP_API = SUPABASE_URL && SUPABASE_KEY ? SUPABASE_URL.replace(/\/+$/, '') + '/rest/v1/rpc/' : '';
 let mapStatus = MAP_API ? 'loading' : 'local', mapRemoteAt = null, mapErr = '';
 const DEFAULT_MAPPING = JSON.parse(JSON.stringify(MAPPING));
 const MAP_KEY = 'voc_mapping_v1';
@@ -328,13 +331,19 @@ function saveMapping() {
 }
 loadMapping();
 
+// 요청 → Supabase DB 함수 호출 (mapping_get / add / delete / replace / init)
 async function cloudReq(payload) {
-  const r = payload
-    ? await fetch(MAP_API, { method: 'POST', body: JSON.stringify(payload) }) // text/plain → 사전요청 없이 전송
-    : await fetch(MAP_API, { cache: 'no-store' });
-  if (!r.ok) throw new Error('HTTP ' + r.status);
-  const j = await r.json();
-  if (!j.ok) throw new Error(j.error || '저장소 오류');
+  const op = payload ? payload.op : 'get';
+  const fn = { get: 'mapping_get', add: 'mapping_add', del: 'mapping_delete', replace: 'mapping_replace', init: 'mapping_init' }[op];
+  const body = op === 'add' ? { p_c: payload.c, p_a: payload.a }
+    : op === 'del' ? { p_c: payload.c }
+    : (op === 'replace' || op === 'init') ? { p_m: payload.mapping } : {};
+  const h = { 'Content-Type': 'application/json', apikey: SUPABASE_KEY };
+  if (/^eyJ/.test(SUPABASE_KEY)) h.Authorization = 'Bearer ' + SUPABASE_KEY; // 예전 형식(JWT) anon 키
+  const r = await fetch(MAP_API + fn, { method: 'POST', headers: h, body: JSON.stringify(body), cache: 'no-store' });
+  const j = await r.json().catch(() => null);
+  if (!r.ok) throw new Error((j && (j.message || j.hint)) || 'HTTP ' + r.status);
+  if (!j || !j.ok) throw new Error('저장소 응답 오류');
   return j;
 }
 function cloudApply(j) {
@@ -1102,7 +1111,7 @@ function renderMappingUI() {
         <button class="btn-add" onclick="addMap()">+ 추가</button>
       </div>
       <div class="me-note">${MAP_API
-        ? `☁ <b>공유 저장소(구글 시트)</b>에 저장됩니다 — 누가 어디서 열어도 같은 매핑이 적용됩니다.<br>
+        ? `☁ <b>공유 저장소(Supabase)</b>에 저장됩니다 — 누가 어디서 열어도 같은 매핑이 적용됩니다.<br>
            상태: <b style="color:${mapStatus==='error'?'var(--red)':mapStatus==='synced'?'var(--grn)':'var(--t2)'}">${{loading:'불러오는 중…',saving:'저장 중…',synced:'✓ 동기화됨',error:'⚠ 연결 실패 — 이 브라우저 백업본 사용 중 ('+esc(mapErr)+')'}[mapStatus]}</b>
            ${mapRemoteAt?` · 마지막 수정 ${new Date(mapRemoteAt).toLocaleString('ko-KR')}`:''}`
         : `⚠ 공유 저장소가 아직 연결되지 않아 <b>이 브라우저에만</b> 저장됩니다.
