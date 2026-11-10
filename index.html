@@ -305,8 +305,8 @@ let MAPPING = [
 // - Supabase 주소·키가 있으면: 공유 저장소에서 불러오고 변경도 거기에 저장 → 모든 사람이 같은 매핑
 //   (테이블·함수는 supabase-setup.sql 로 생성. 키는 공개용 anon/publishable 키 — 쓰기는 DB 함수로만 허용)
 // - 이 브라우저(localStorage)에는 마지막 상태를 백업 (공유 저장소 접속 실패 시 사용)
-const SUPABASE_URL = '';   // 예: https://abcdefgh.supabase.co
-const SUPABASE_KEY = '';   // Project Settings > API Keys 의 anon(또는 publishable) 키
+const SUPABASE_URL = 'https://iwfiilgjiqkdsuybqwwk.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_q3SLb7fToGXt9J4o7tkYOw_QArw7mQ9'; // 공개용 키 (쓰기는 DB 함수로만 허용)
 const MAP_API = SUPABASE_URL && SUPABASE_KEY ? SUPABASE_URL.replace(/\/+$/, '') + '/rest/v1/rpc/' : '';
 let mapStatus = MAP_API ? 'loading' : 'local', mapRemoteAt = null, mapErr = '';
 const DEFAULT_MAPPING = JSON.parse(JSON.stringify(MAPPING));
