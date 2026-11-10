@@ -87,6 +87,28 @@ begin
   return mapping_get();
 end $$;
 
+-- 그룹 수정: 대표명 변경 + 이름 목록 통째로 교체 (이름 빼기 포함). 없으면 새로 추가
+create or replace function public.mapping_set(p_old text, p_c text, p_a text[])
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare clean text[];
+begin
+  p_c := trim(coalesce(p_c, ''));
+  p_old := trim(coalesce(p_old, ''));
+  if p_c = '' then raise exception '대표명이 필요합니다'; end if;
+  select coalesce(array_agg(x order by o), '{}') into clean
+    from (select distinct on (lower(trim(x))) trim(x) as x, o
+            from unnest(coalesce(p_a, '{}')) with ordinality as t(x, o)
+           where trim(x) <> '' order by lower(trim(x)), o) s;
+  if lower(p_c) <> lower(p_old) and exists (select 1 from partner_mapping where lower(canonical) = lower(p_c)) then
+    raise exception '이미 있는 대표명입니다: %', p_c;
+  end if;
+  update partner_mapping set canonical = p_c, aliases = clean, updated_at = now() where lower(canonical) = lower(p_old);
+  if not found then insert into partner_mapping (canonical, aliases) values (p_c, clean); end if;
+  insert into partner_mapping_log (op, detail)
+    values ('edit', case when lower(p_c) <> lower(p_old) then p_old || ' → ' else '' end || p_c || ' = ' || array_to_string(clean, ', '));
+  return mapping_get();
+end $$;
+
 -- 처음 연결 시: 비어 있을 때만 대시보드의 기본 매핑으로 채움
 create or replace function public.mapping_init(p_m jsonb)
 returns jsonb language plpgsql security definer set search_path = public as $$
@@ -99,9 +121,9 @@ begin
 end $$;
 
 revoke all on function public.mapping_get(), public.mapping_add(text, text[]), public.mapping_delete(text),
-  public.mapping_replace(jsonb), public.mapping_init(jsonb) from public;
+  public.mapping_replace(jsonb), public.mapping_init(jsonb), public.mapping_set(text, text, text[]) from public;
 grant execute on function public.mapping_get(), public.mapping_add(text, text[]), public.mapping_delete(text),
-  public.mapping_replace(jsonb), public.mapping_init(jsonb) to anon, authenticated;
+  public.mapping_replace(jsonb), public.mapping_init(jsonb), public.mapping_set(text, text, text[]) to anon, authenticated;
 
 -- 대시보드가 새 함수를 바로 인식하도록
 notify pgrst, 'reload schema';

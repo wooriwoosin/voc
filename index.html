@@ -155,6 +155,13 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--t1);
 .btn-add{padding:6px 14px;background:var(--t1);color:#fff;border:none;border-radius:var(--r);font-size:12px;cursor:pointer;font-family:inherit;white-space:nowrap}
 .btn-add:hover{opacity:.85}
 .me-note{font-size:10px;color:var(--t3);margin-top:6px}
+.me-edit-btn{font-size:10px;color:var(--blu);cursor:pointer;padding:2px 7px;border:1px solid var(--blu-m);border-radius:4px;background:none;font-family:inherit;white-space:nowrap}
+.me-edit-btn:hover{background:var(--blu-s)}
+.me-row.editing{flex-direction:column;align-items:stretch;border-color:var(--blu);background:var(--blu-s)}
+.me-chips{display:flex;flex-wrap:wrap;gap:4px}
+.me-chip{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-family:var(--mono);background:var(--card);border:1px solid var(--bd2);border-radius:12px;padding:2px 4px 2px 9px}
+.me-chip button{border:none;background:none;color:var(--t3);cursor:pointer;font-size:13px;line-height:1;padding:0 3px}
+.me-chip button:hover{color:var(--red)}
 
 /* 실적 준비 */
 .coming-card{background:var(--card);border:1.5px dashed var(--bd2);border-radius:var(--r2);padding:3rem 2rem;text-align:center}
@@ -334,14 +341,20 @@ loadMapping();
 // 요청 → Supabase DB 함수 호출 (mapping_get / add / delete / replace / init)
 async function cloudReq(payload) {
   const op = payload ? payload.op : 'get';
-  const fn = { get: 'mapping_get', add: 'mapping_add', del: 'mapping_delete', replace: 'mapping_replace', init: 'mapping_init' }[op];
+  const fn = { get: 'mapping_get', add: 'mapping_add', del: 'mapping_delete', replace: 'mapping_replace', init: 'mapping_init', set: 'mapping_set' }[op];
   const body = op === 'add' ? { p_c: payload.c, p_a: payload.a }
+    : op === 'set' ? { p_old: payload.old, p_c: payload.c, p_a: payload.a }
     : op === 'del' ? { p_c: payload.c }
     : (op === 'replace' || op === 'init') ? { p_m: payload.mapping } : {};
   const h = { 'Content-Type': 'application/json', apikey: SUPABASE_KEY };
   if (/^eyJ/.test(SUPABASE_KEY)) h.Authorization = 'Bearer ' + SUPABASE_KEY; // 예전 형식(JWT) anon 키
   const r = await fetch(MAP_API + fn, { method: 'POST', headers: h, body: JSON.stringify(body), cache: 'no-store' });
   const j = await r.json().catch(() => null);
+  // 수정 함수(mapping_set)가 DB에 아직 없으면(최신 SQL 미실행) → 삭제 후 다시 추가로 대신 처리
+  if (op === 'set' && r.status === 404) {
+    await cloudReq({ op: 'del', c: payload.old });
+    return cloudReq({ op: 'add', c: payload.c, a: payload.a.length ? payload.a : [payload.c] });
+  }
   if (!r.ok) throw new Error((j && (j.message || j.hint)) || 'HTTP ' + r.status);
   if (!j || !j.ok) throw new Error('저장소 응답 오류');
   return j;
@@ -1095,10 +1108,25 @@ function buildMapping() {
 
 function renderMappingUI() {
   const pnl=document.getElementById('pnl-mapping');
-  const listHtml=MAPPING.map((m,i)=>`
+  const editIdx=mapDraft?MAPPING.findIndex(m=>m.c.toLowerCase()===mapDraft.old.toLowerCase()):-1;
+  const listHtml=MAPPING.map((m,i)=> i===editIdx ? `
+    <div class="me-row editing" id="me-editing">
+      <div class="me-add">
+        <span style="font-size:11px;color:var(--t2)">대표명</span>
+        <input class="me-inp" id="ed-c" value="${esc(mapDraft.c)}" style="width:160px" oninput="mapDraft.c=this.value">
+      </div>
+      <div class="me-chips">${mapDraft.a.length?mapDraft.a.map((x,j)=>`<span class="me-chip">${esc(x)}<button title="이 이름 빼기" onclick="edDelAlias(${j})">×</button></span>`).join(''):'<span style="font-size:11px;color:var(--t3)">묶인 이름 없음</span>'}</div>
+      <div class="me-add">
+        <input class="me-inp" id="ed-a" placeholder="추가할 이름 — 쉼표로 여러 개 (Enter)" style="flex:1;min-width:200px" onkeydown="if(event.key==='Enter')edAddAlias()">
+        <button class="btn-sm" onclick="edAddAlias()">+ 이름 추가</button>
+        <button class="btn-add" onclick="edSave()">저장</button>
+        <button class="btn-sm" onclick="edCancel()">취소</button>
+      </div>
+    </div>` : `
     <div class="me-row">
       <span class="me-canon">${esc(m.c)}</span>
       <span class="me-aliases">${esc(m.a.join(', '))}</span>
+      <button class="me-edit-btn" onclick="edStart(${i})">수정</button>
       <button class="me-del" onclick="delMap(${i})">삭제</button>
     </div>`).join('');
   pnl.innerHTML=`
@@ -1173,6 +1201,29 @@ function resetMap(){
   try{localStorage.removeItem(MAP_KEY);}catch(e){}
   mapSavedAt=null; applyMapping();
   cloudSend({op:'replace',mapping:MAPPING});
+}
+// ── 기존 그룹 수정: 이름 추가/빼기, 대표명 변경 ──
+let mapDraft = null; // {old: 원래 대표명, c, a}
+function edStart(i){ mapDraft={old:MAPPING[i].c, c:MAPPING[i].c, a:MAPPING[i].a.slice()}; renderMappingUI();
+  const el=document.getElementById('me-editing'); if(el){ el.scrollIntoView({block:'nearest'}); document.getElementById('ed-a').focus(); } }
+function edCancel(){ mapDraft=null; renderMappingUI(); }
+function edAddAlias(){
+  const inp=document.getElementById('ed-a');
+  inp.value.split(',').map(x=>x.trim()).filter(Boolean).forEach(x=>{ if(!mapDraft.a.some(y=>y.toLowerCase()===x.toLowerCase())) mapDraft.a.push(x); });
+  renderMappingUI(); const n=document.getElementById('ed-a'); if(n) n.focus();
+}
+function edDelAlias(j){ mapDraft.a.splice(j,1); renderMappingUI(); }
+function edSave(){
+  const pending=document.getElementById('ed-a'); if(pending&&pending.value.trim()) edAddAlias(); // 입력만 하고 안 누른 이름도 포함
+  const old=mapDraft.old, c=mapDraft.c.trim();
+  const idx=MAPPING.findIndex(m=>m.c.toLowerCase()===old.toLowerCase());
+  if(idx<0){alert('다른 사람이 이 그룹을 삭제했습니다. 새로 추가해주세요.');mapDraft=null;renderMappingUI();return;}
+  if(!c){alert('대표명을 입력해주세요.');return;}
+  if(MAPPING.some((m,k)=>k!==idx&&m.c.toLowerCase()===c.toLowerCase())){alert(`"${c}" 대표명이 이미 있습니다. 다른 이름을 쓰거나 그 그룹에 추가해주세요.`);return;}
+  const a=mapDraft.a.slice();
+  MAPPING[idx]={c,a}; mapDraft=null;
+  saveMapping(); applyMapping();
+  cloudSend({op:'set',old,c,a});
 }
 function delMap(idx) {
   const c=MAPPING[idx].c;
